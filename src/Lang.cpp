@@ -4,7 +4,7 @@
 //   1. English, compiled in below (also defines the list of keys);
 //   2. language files embedded at build time from the project's lang\ folder
 //      (tools/embed_lang.ps1 turns them into byte arrays, see the pre-build step);
-//   3. language files in the VTFExport_lang folder next to the plug-in.
+//   3. language files in the VTFBridge_lang folder next to the plug-in.
 // A file whose language.code matches an existing language only overrides the
 // strings it contains; everything else comes from the lower levels.
 #include "Lang.h"
@@ -56,6 +56,13 @@ const Builtin kStrings[] = {
     {"dlg.reset",         L"Reset"},
     {"dlg.save",          L"Save"},
     {"dlg.cancel",        L"Cancel"},
+    {"dlg.file_size",     L"Estimated file size: {size}"},
+    {"dlg.group_vmt",     L"Material"},
+    {"dlg.vmt",           L"Create .vmt (if missing)"},
+    {"unit.b",            L"B"},
+    {"unit.kb",           L"KB"},
+    {"unit.mb",           L"MB"},
+    {"unit.decimal",      L"."},
 
     {"fmt.auto_dxt",      L"Auto: DXT1 (no alpha) / DXT5 (alpha)"},
     {"fmt.auto_raw",      L"Auto: BGR888 / BGRA8888 (uncompressed)"},
@@ -80,9 +87,37 @@ const Builtin kStrings[] = {
     {"flag.vertex_texture",    L"Vertex Texture"},
     {"flag.border",            L"Border"},
 
+    {"tip.point_sample",      L"No smoothing between pixels: a crisp, pixelated look (pixel art, some UI)."},
+    {"tip.trilinear",         L"Trilinear filtering: smooth blending between mipmap levels."},
+    {"tip.anisotropic",       L"Anisotropic filtering: keeps the texture sharp when seen at a steep angle."},
+    {"tip.clamp_s",           L"Do not repeat the texture horizontally: edge pixels are stretched instead.\n"
+                              L"Also stops mipmaps and resizing from wrapping around the left/right edges."},
+    {"tip.clamp_t",           L"Do not repeat the texture vertically: edge pixels are stretched instead.\n"
+                              L"Also stops mipmaps and resizing from wrapping around the top/bottom edges."},
+    {"tip.clamp_u",           L"Do not repeat along the depth (volume textures only)."},
+    {"tip.no_mipmap",         L"The engine uses only the full-size image. Typical for UI and HUD textures."},
+    {"tip.no_lod",            L"Always load the full resolution, ignoring the texture quality setting.\n"
+                              L"Typical for UI and HUD textures."},
+    {"tip.normal_map",        L"The texture is a normal map. Mipmaps are renormalized so that the bumps\n"
+                              L"do not flatten out in the distance; gamma-correct filtering is not applied."},
+    {"tip.ssbump",            L"Self-shadowing bump map (for example made with height2ssbump).\n"
+                              L"Use it with \"$ssbump\" \"1\" in the material."},
+    {"tip.hint_dxt5",         L"Used for skybox textures: helps to avoid visible seams at the edges."},
+    {"tip.srgb",              L"Marks the texture as sRGB. Rarely needed: most Source games ignore it."},
+    {"tip.no_debug_override", L"Excludes the texture from the engine's debug texture overrides."},
+    {"tip.single_copy",       L"The engine keeps only one copy of this texture in memory."},
+    {"tip.vertex_texture",    L"Texture read by vertex shaders. Rarely needed."},
+    {"tip.border",            L"Clamp to a border colour instead of the edge pixels. Rarely needed."},
+    {"tip.vmt",               L"Also writes a material next to the .vtf. $basetexture is the path after the\n"
+                              L"\"materials\" folder. Alpha adds $alphatest (cut-out) or $translucent (soft),\n"
+                              L"several frames add the AnimatedTexture proxy.\n"
+                              L"An existing .vmt is never overwritten. Not available for normal maps."},
+    {"tip.shader",            L"VertexLitGeneric: models\nLightmappedGeneric: world brushes\n"
+                              L"UnlitGeneric: sprites, UI, no lighting"},
+
     {"layer.frame",       L"Frame {n}"},
 
-    {"msg.title",         L"VTF Export"},
+    {"msg.title",         L"VTFBridge"},
     {"msg.mode",          L"VTF: only RGB and Grayscale modes are supported."},
     {"msg.too_big",       L"VTF: the maximum texture size is 65535 x 65535."},
     {"msg.npot",          L"The image size is not a power of two (for example 512 x 256).\n"
@@ -95,13 +130,17 @@ const Builtin kStrings[] = {
     {"msg.volume",        L"- it is a volume texture ({depth} slices): only the first slice is opened;"},
     {"msg.format_note",   L"Format: {format}"},
     {"msg.layer_error",   L"Cannot read layer \"{name}\" of the document."},
+    {"msg.vmt_error",     L"The texture is saved, but the material could not be written:\n{path}"},
+    {"msg.vmt_no_path",   L"The texture is saved, but its folder is unknown, so no .vmt was created."},
 
-    {"about.title",       L"About VTF Export"},
-    {"about.text",        L"VTF Export {version} for Adobe Photoshop (x64)\n\n"
+    {"about.title",       L"About VTFBridge"},
+    {"about.updates",     L"Check for updates"},
+    {"about.text",        L"VTFBridge {version} for Adobe Photoshop (x64)\n\n"
                           L"Opens and saves Valve Texture Format (.vtf) files.\n"
                           L"Animated textures open as layers; visible layers can be saved as frames.\n"
                           L"Saving: DXT1/3/5, BGR(A)8888, RGB(A)8888, 565/4444/5551, I8, IA88, A8,\n"
-                          L"power-of-two resize, mipmaps with 15 filters, thumbnail, flags, versions 7.1 - 7.5.\n\n"
+                          L"power-of-two resize, mipmaps with 15 filters, thumbnail, flags, versions 7.1 - 7.5,\n"
+                          L"optional .vmt material.\n\n"
                           L"Languages folder: {folder}\n\n"
                           L"DXT compression: stb_dxt (public domain)."},
 };

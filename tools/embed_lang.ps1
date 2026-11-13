@@ -1,6 +1,6 @@
 # embed_lang.ps1 - turns every lang\*.lang file into a byte array that is
 # compiled into the plug-in (included by src\Lang.cpp). Run by the pre-build
-# step of VTFExport.vcxproj; the output is only rewritten when it changes.
+# step of VTFBridge.vcxproj; the output is only rewritten when it changes.
 param(
     [Parameter(Mandatory = $true)][string]$LangDir,
     [Parameter(Mandatory = $true)][string]$Out

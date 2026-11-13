@@ -1,6 +1,6 @@
-// VTFExport.rc - dialog and PiPL resources (UTF-8).
+// VTFBridge.rc - dialog and PiPL resources (UTF-8).
 // Captions are placeholders: the real texts are set at runtime from Lang.cpp
-// and the language files (see ApplyTexts() in VTFExportUI.cpp).
+// and the language files (see ApplyTexts() in VTFBridgeUI.cpp).
 #pragma code_page(65001)
 
 #include <windows.h>
@@ -48,7 +48,7 @@ BEGIN
     COMBOBOX        IDC_ORDER, 108, 265, 142, 100, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
     LTEXT           "", IDC_ANIM_HINT, 24, 280, 226, 9
 
-    GROUPBOX        "Flags", IDC_GRP_FLAGS, 263, 20, 140, 272
+    GROUPBOX        "Flags", IDC_GRP_FLAGS, 263, 20, 140, 224
     AUTOCHECKBOX    "", 1100, 270, 33, 128, 10
     AUTOCHECKBOX    "", 1101, 270, 46, 128, 10
     AUTOCHECKBOX    "", 1102, 270, 59, 128, 10
@@ -66,14 +66,19 @@ BEGIN
     AUTOCHECKBOX    "", 1114, 270, 215, 128, 10
     AUTOCHECKBOX    "", 1115, 270, 228, 128, 10
 
+    GROUPBOX        "Material", IDC_GRP_VMT, 263, 248, 140, 44
+    AUTOCHECKBOX    "", IDC_VMT, 270, 260, 128, 10
+    COMBOBOX        IDC_SHADER, 270, 274, 128, 100, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+
     PUSHBUTTON      "Reset", IDC_RESET, 7, 296, 60, 14
+    LTEXT           "", IDC_FILESIZE, 72, 299, 200, 9
     DEFPUSHBUTTON   "Save", IDOK, 279, 296, 60, 14
     PUSHBUTTON      "Cancel", IDCANCEL, 343, 296, 60, 14
 END
 
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION     VTFEXPORT_VERSION_MAJOR, VTFEXPORT_VERSION_MINOR, VTFEXPORT_VERSION_PATCH, 0
-PRODUCTVERSION  VTFEXPORT_VERSION_MAJOR, VTFEXPORT_VERSION_MINOR, VTFEXPORT_VERSION_PATCH, 0
+FILEVERSION     VTFBRIDGE_VERSION_MAJOR, VTFBRIDGE_VERSION_MINOR, VTFBRIDGE_VERSION_PATCH, 0
+PRODUCTVERSION  VTFBRIDGE_VERSION_MAJOR, VTFBRIDGE_VERSION_MINOR, VTFBRIDGE_VERSION_PATCH, 0
 FILEFLAGSMASK   0x3fL
 FILEFLAGS       0x0L
 FILEOS          VOS_NT_WINDOWS32
@@ -84,12 +89,12 @@ BEGIN
     BEGIN
         BLOCK "040904b0"
         BEGIN
-            VALUE "FileDescription", "VTF Export - Valve Texture Format plug-in for Adobe Photoshop"
-            VALUE "FileVersion", VTFEXPORT_VERSION_STR
-            VALUE "InternalName", "VTFExport"
-            VALUE "OriginalFilename", "VTFExport.8bi"
-            VALUE "ProductName", "VTF Export"
-            VALUE "ProductVersion", VTFEXPORT_VERSION_STR
+            VALUE "FileDescription", "VTFBridge - Valve Texture Format plug-in for Adobe Photoshop"
+            VALUE "FileVersion", VTFBRIDGE_VERSION_STR
+            VALUE "InternalName", "VTFBridge"
+            VALUE "OriginalFilename", "VTFBridge.8bi"
+            VALUE "ProductName", "VTFBridge"
+            VALUE "ProductVersion", VTFBRIDGE_VERSION_STR
         END
     END
     BLOCK "VarFileInfo"
@@ -98,5 +103,5 @@ BEGIN
     END
 END
 
-// PiPL resource produced by Cnvtpipl from VTFExport.r (see the .vcxproj custom build step).
-#include "VTFExport.pipl"
+// PiPL resource produced by Cnvtpipl from VTFBridge.r (see the .vcxproj custom build step).
+#include "VTFBridge.pipl"

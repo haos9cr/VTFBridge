@@ -21,6 +21,9 @@
 #define IDC_ANIMATE            1026
 #define IDC_ORDER              1027
 #define IDC_ANIM_HINT          1028
+#define IDC_VMT                1029
+#define IDC_SHADER             1030
+#define IDC_FILESIZE           1031
 
 // Static texts / group boxes whose captions are localised at runtime.
 #define IDC_LBL_LANG           1040
@@ -37,7 +40,8 @@
 #define IDC_LBL_MIPFILTER      1052
 #define IDC_GRP_ANIM           1053
 #define IDC_LBL_ORDER          1054
+#define IDC_GRP_VMT            1055
 
-// Flag checkboxes: IDC_FLAG_FIRST + index into kFlags (VTFExportUI.cpp).
+// Flag checkboxes: IDC_FLAG_FIRST + index into kFlags (VTFBridgeUI.cpp).
 #define IDC_FLAG_FIRST         1100
 #define IDC_FLAG_LAST          1199

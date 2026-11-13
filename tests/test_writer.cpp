@@ -6,6 +6,18 @@
 #include <string>
 #include <vector>
 
+// Checks vtf::FileSize() against a written file (size, format and frames from its header).
+static int g_sizeErrors = 0;
+static void CheckSize(const std::vector<uint8_t>& f, const vtf::Options& o, const char* what) {
+    auto u16 = [&](size_t i) { return uint32_t(f[i] | (f[i + 1] << 8)); };
+    const int32_t fmt = int32_t(u16(52) | (u16(54) << 16));
+    const uint64_t expect = vtf::FileSize(u16(16), u16(18), fmt, u16(24), o);
+    if (expect != f.size()) {
+        std::printf("FAIL FileSize %s: %llu != %zu\n", what, (unsigned long long)expect, f.size());
+        ++g_sizeErrors;
+    }
+}
+
 static bool Save(const std::string& path, const std::vector<uint8_t>& data) {
     FILE* f = std::fopen(path.c_str(), "wb");
     if (!f) return false;
@@ -54,6 +66,7 @@ int main(int argc, char** argv) {
                 ++failures;
                 continue;
             }
+            CheckSize(out, o, vtf::FormatName(fmt));
             Save(outDir + "/" + vtf::FormatName(fmt) + "_7" + std::to_string(ver) + ".vtf", out);
         }
     }
@@ -72,6 +85,7 @@ int main(int argc, char** argv) {
             o.colorFormat = c.colorFmt; o.alphaFormat = c.alphaFmt; o.mipmaps = c.mips; o.thumbnail = c.thumb; o.versionMinor = ver;
             std::vector<uint8_t> out; std::string err;
             if (!vtf::Write(c.img->data(), W, H, o, out, err)) { ++failures; continue; }
+            CheckSize(out, o, c.name);
             Save(outDir + "/" + c.name + "_7" + std::to_string(ver) + ".vtf", out);
         }
     }
@@ -82,9 +96,10 @@ int main(int argc, char** argv) {
         vtf::Options o; o.colorFormat = o.alphaFormat = vtf::FMT_DXT5;
         std::vector<uint8_t> out; std::string err;
         if (!vtf::Write(tiny.data(), s, s, o, out, err)) ++failures;
-        else Save(outDir + "/tiny" + std::to_string(s) + ".vtf", out);
+        else CheckSize(out, o, "tiny"), Save(outDir + "/tiny" + std::to_string(s) + ".vtf", out);
     }
 
+    failures += g_sizeErrors;
     std::printf("done, failures=%d\n", failures);
     return failures ? 1 : 0;
 }

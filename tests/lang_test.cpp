@@ -33,12 +33,12 @@ int wmain(int argc, wchar_t** argv) {
     if (argc >= 4 && std::wstring(argv[2]) == L"--template") {
         FILE* f = _wfopen(argv[3], L"wb");
         if (!f) return 1;
-        std::fputs("# VTF Export language file template (all strings in English).\n"
+        std::fputs("# VTFBridge language file template (all strings in English).\n"
                    "#\n"
                    "# Two ways to use a translation:\n"
                    "#  a) Built into the plug-in: put the file into the project's lang\\ folder\n"
                    "#     (e.g. lang\\pl.lang) and rebuild. Check it with: python tools/check_lang.py\n"
-                   "#  b) Without rebuilding: put it into the VTFExport_lang folder next to VTFExport.8bi.\n"
+                   "#  b) Without rebuilding: put it into the VTFBridge_lang folder next to VTFBridge.8bi.\n"
                    "#     A file there with the same language.code as a built-in language only\n"
                    "#     overrides the strings it contains.\n"
                    "#\n"

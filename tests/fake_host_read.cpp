@@ -93,7 +93,7 @@ int main(int argc, char** argv) {
 
     // ---- re-save the same document (no Options call, like a scripted Save) ----
     // Make sure the plug-in can't fall back to "last used" settings in the registry.
-    RegDeleteKeyA(HKEY_CURRENT_USER, "Software\\VTFExport");
+    RegDeleteKeyA(HKEY_CURRENT_USER, "Software\\VTFBridge");
     HANDLE out = CreateFileA(argv[4], GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, 0, nullptr);
     g_fr.dataFork = (intptr_t)out;
     g_fr.advanceState = WriteAdvance;

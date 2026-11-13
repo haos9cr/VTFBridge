@@ -2,7 +2,7 @@
 # Runs the test suite on Linux. No Photoshop SDK needed.
 #
 #   tests/run_tests.sh            core tests (g++ + python3 with srctools)
-#   tests/run_tests.sh --wine     + plug-in tests: cross-compiles VTFExport.8bi with
+#   tests/run_tests.sh --wine     + plug-in tests: cross-compiles VTFBridge.8bi with
 #                                   MinGW against tests/sdk_stub and runs fake
 #                                   Photoshop hosts under Wine
 #
@@ -51,6 +51,16 @@ mkdir -p anim
 run ./anim_test anim
 run $PY "$ROOT/tests/validate_anim.py" anim
 
+step "Normal-map mipmaps stay unit length"
+$CXX $CXXFLAGS "$ROOT/tests/normal_test.cpp" $CORE -o normal_test
+mkdir -p normal
+run ./normal_test normal
+run $PY "$ROOT/tests/validate_normal.py" normal
+
+step "VMT builder"
+$CXX $CXXFLAGS "$ROOT/tests/vmt_test.cpp" "$ROOT/src/Vmt.cpp" -o vmt_test
+run ./vmt_test
+
 step "Language files"
 run $PY "$ROOT/tools/check_lang.py"
 
@@ -59,13 +69,13 @@ if [[ $WINE_TESTS == 1 ]]; then
     STUB="$ROOT/tests/sdk_stub"
     export WINEDEBUG=-all WINEPREFIX="$OUT/wineprefix"
 
-    step "Cross-compiling VTFExport.8bi against the SDK stub"
+    step "Cross-compiling VTFBridge.8bi against the SDK stub"
     $PY "$ROOT/tools/embed_lang.py" "$ROOT/lang" gen/lang_embedded.inc
-    sed '/VTFExport.pipl/d' "$ROOT/src/VTFExport.rc" > res.rc
+    sed '/VTFBridge.pipl/d' "$ROOT/src/VTFBridge.rc" > res.rc
     x86_64-w64-mingw32-windres -c 65001 -I "$ROOT/src" res.rc -O coff -o res.o
     $MCXX -std=c++17 -O2 -w -municode -DUNICODE -D_UNICODE -DNOMINMAX -D_WIN32_WINNT=0x0601 -I "$ROOT/src" -I "$STUB" -I gen -shared \
-        "$ROOT"/src/VTFExport.cpp "$ROOT"/src/VTFExportUI.cpp "$ROOT"/src/Lang.cpp $CORE res.o \
-        -o VTFExport.8bi -static -luser32 -ladvapi32 -lshell32
+        "$ROOT"/src/VTFBridge.cpp "$ROOT"/src/VTFBridgeUI.cpp "$ROOT"/src/Lang.cpp "$ROOT"/src/Vmt.cpp $CORE res.o \
+        -o VTFBridge.8bi -static -luser32 -ladvapi32 -lshell32 -lcomctl32
     for t in fake_host fake_host_read; do
         $MCXX -std=c++17 -O2 -w -I "$STUB" "$ROOT/tests/$t.cpp" -o $t.exe -static -ladvapi32
     done
@@ -78,7 +88,7 @@ if [[ $WINE_TESTS == 1 ]]; then
     step "Fake host: save (8/16/32 bit, RGB/Gray, alpha) - BGRA8888 and Auto"
     for fmt in 12 1000; do
         mkdir -p host$fmt
-        run wine fake_host.exe VTFExport.8bi "$(wpath host$fmt)" $fmt
+        run wine fake_host.exe VTFBridge.8bi "$(wpath host$fmt)" $fmt
         run_tail 1 $PY "$ROOT/tests/validate_host.py" host$fmt
     done
 
@@ -88,14 +98,14 @@ if [[ $WINE_TESTS == 1 ]]; then
           writer/BGRA8888_72.vtf reader/st_ABGR8888.vtf reader/st_RGB888_BLUESCREEN.vtf)
     for f in "${srcs[@]}"; do
         b=$(basename "$f" .vtf)
-        run wine fake_host_read.exe VTFExport.8bi "$(wpath "$f")" "$(wpath roundtrip)\\$b.rgba" \
+        run wine fake_host_read.exe VTFBridge.8bi "$(wpath "$f")" "$(wpath roundtrip)\\$b.rgba" \
             "$(wpath roundtrip)\\$b.resaved.vtf" > /dev/null
     done
     run_tail 1 $PY "$ROOT/tests/validate_roundtrip.py" roundtrip "${srcs[@]}"
 
     step "Fake host: animation as layers (order, names, hidden layer, merged image)"
     mkdir -p layers
-    run wine fake_host_layers.exe VTFExport.8bi "$(wpath anim/anim_bgra_75.vtf)" "$(wpath layers)"
+    run wine fake_host_layers.exe VTFBridge.8bi "$(wpath anim/anim_bgra_75.vtf)" "$(wpath layers)"
 
     step "Languages: embedded + folder, key-by-key override"
     mkdir -p langdir

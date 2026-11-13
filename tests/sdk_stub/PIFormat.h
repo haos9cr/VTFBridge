@@ -32,6 +32,7 @@ typedef struct {
   void* platformData; ReadImageDocumentDesc* documentInfo; ChannelPortProcs* channelPortProcs;
   HandleProcs* handleProcs; Handle revertInfo; uint32 layerData; uint16* layerName; int16 transparencyPlane, transparencyMatting; Handle imageRsrcData; int32 imageRsrcSize;
   Boolean HostSupports32BitCoordinates, PluginUsing32BitCoordinates; VPoint imageSize32; VRect theRect32;
+  uint16* finalSpec;  /* UTF-16 path of the file being saved (real SDK: since Photoshop CS4) */
 } FormatRecord, *FormatRecordPtr;
 enum { noErr = 0, userCanceledErr = -128, writErr = -20, readErr = -19, dskFulErr = -34, memFullErr = -108, formatBadParameters = -30500, formatCannotRead = -30501 };
 enum { formatSelectorAbout, formatSelectorReadPrepare, formatSelectorReadStart, formatSelectorReadContinue, formatSelectorReadFinish,

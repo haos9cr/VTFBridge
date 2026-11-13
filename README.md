@@ -1,4 +1,4 @@
-# VTF Export — Valve Texture Format plug-in for Photoshop (x64)
+# VTFBridge — Valve Texture Format plug-in for Photoshop (x64)
 
 [Русская версия](README.ru.md)
 
@@ -8,6 +8,8 @@ modern 64-bit Adobe Photoshop on Windows.
 
 It replaces the old 32-bit `VTF.8bi` plug-in, which does not load in 64-bit Photoshop.
 No external DLLs: VTFLib is not needed, DXT compression is built in.
+
+Formerly named **VTF Export** (1.0).
 
 ![Save dialog](docs/screenshot.png)
 
@@ -31,7 +33,11 @@ No external DLLs: VTFLib is not needed, DXT compression is built in.
 - Resize to a power of two (nearest / larger / smaller) with a filter and max width / height;
   the final size is shown in the dialog.
 - Texture flags (Point Sample, Trilinear, Anisotropic, Clamp S/T/U, No Mipmap, No LOD, Normal Map,
-  SSBump, sRGB, …); one/eight-bit alpha flags are set automatically.
+  SSBump, sRGB, …) with a tooltip for each; one/eight-bit alpha flags are set automatically.
+- **Normal maps:** with the *Normal Map* flag the mipmaps are renormalized, so the bumps do not
+  flatten out in the distance.
+- **Optional `.vmt`** next to the texture (see [Material](#material-vmt)).
+- Estimated file size in the dialog.
 - **Visible layers → animation frames.**
 - RGB and Grayscale documents, 8/16/32 bits per channel.
 - Remembers the last used settings.
@@ -40,12 +46,16 @@ No external DLLs: VTFLib is not needed, DXT compression is built in.
 
 ## Installation
 
-1. Download `VTFExport-<version>.zip` from [Releases](../../releases).
+1. Download `VTFBridge-<version>.zip` from [Releases](../../releases).
 2. Close Photoshop.
-3. Copy `VTFExport.8bi` into Photoshop's plug-in folder, for example
+3. Copy `VTFBridge.8bi` into Photoshop's plug-in folder, for example
    `C:\Program Files\Adobe\Adobe Photoshop 2026\Plug-ins\` (needs administrator rights).
-   Optionally copy the `VTFExport_lang` folder next to it (only needed for your own translations).
+   Optionally copy the `VTFBridge_lang` folder next to it (only needed for your own translations).
 4. Start Photoshop.
+
+**Updating from VTF Export 1.0:** delete the old `VTFExport.8bi` from the plug-in folder (otherwise
+Photoshop lists the format twice). Your settings are moved over automatically, and an existing
+`VTFExport_lang` folder keeps working (you may rename it to `VTFBridge_lang`).
 
 Requires 64-bit Photoshop for Windows (any version that loads 64-bit format plug-ins; developed
 and tested with Photoshop 2026 / 27.x).
@@ -95,6 +105,21 @@ it is set in the `.vmt` (`animatedtextureframerate` of the `AnimatedTexture` pro
 Note: Photoshop may not keep the colour of fully transparent layer pixels. If the alpha of an
 animation is a mask (not transparency) and the colour under it matters, check the result.
 
+### Material (.vmt)
+
+Check **Create .vmt (if missing)** in the *Material* box and pick a shader: `VertexLitGeneric`
+(models), `LightmappedGeneric` (world brushes) or `UnlitGeneric` (sprites, UI). The plug-in then
+writes `<name>.vmt` next to the saved `<name>.vtf`:
+
+- `$basetexture` is the path after the `materials` folder
+  (`…\materials\models\box\wood.vtf` → `models/box/wood`); outside a `materials` folder it is just
+  the file name.
+- Alpha adds `$alphatest` (only fully transparent / fully opaque pixels) or `$translucent` (soft alpha).
+- Several frames add the `AnimatedTexture` proxy (10 frames per second — change it in the file).
+- An existing `.vmt` is **never overwritten**, so your own edits are safe.
+- Not available for normal maps and SSBump textures: they are part of another material.
+- If the plug-in cannot find out where the file is saved, it shows a warning; the `.vtf` is saved anyway.
+
 ## Translations
 
 The dialog language is chosen at the top right of the save dialog (*Auto* = Windows language).
@@ -102,7 +127,7 @@ The dialog language is chosen at the top right of the save dialog (*Auto* = Wind
 Sources, each overriding the previous one **string by string**:
 1. English — compiled in (`src/Lang.cpp`); fallback for any missing string;
 2. `lang/*.lang` files of this repository — embedded into the plug-in at build time;
-3. `*.lang` files in the `VTFExport_lang` folder next to `VTFExport.8bi` — no rebuild needed.
+3. `*.lang` files in the `VTFBridge_lang` folder next to `VTFBridge.8bi` — no rebuild needed.
 
 A file with the same `language.code` as a built-in language does not add a second entry; it only
 replaces the strings it contains — handy for fixing a few strings.
@@ -111,9 +136,9 @@ replaces the strings it contains — handy for fixing a few strings.
 `lang/<code>.lang` (UTF-8), set `language.name` and `language.code`, translate, check with
 `python tools/check_lang.py`, and open a pull request. Details: [CONTRIBUTING.md](CONTRIBUTING.md).
 
-**Without rebuilding:** put the file into `VTFExport_lang` next to the plug-in. Languages are
+**Without rebuilding:** put the file into `VTFBridge_lang` next to the plug-in. Languages are
 re-read every time the dialog opens. The folder path is shown in
-*Help → About Plug-In → VTF Export*.
+*Help → About Plug-In → VTFBridge*.
 
 ## Building from source
 
@@ -125,16 +150,16 @@ re-read every time the dialog opens. The folder path is shown in
    ```
    photoshop_sdk\pluginsdk\photoshopapi\photoshop\PIFormat.h
    ```
-   (or build with `msbuild VTFExport.sln /p:PhotoshopSdkDir=D:\path\to\sdk\` — the folder that
+   (or build with `msbuild VTFBridge.sln /p:PhotoshopSdkDir=D:\path\to\sdk\` — the folder that
    contains `pluginsdk`, trailing backslash required).
-3. Open `VTFExport.sln`, select **Release | x64**, build.
-   Output: `bin\Release\VTFExport.8bi` and `bin\Release\VTFExport_lang\`.
+3. Open `VTFBridge.sln`, select **Release | x64**, build.
+   Output: `bin\Release\VTFBridge.8bi` and `bin\Release\VTFBridge_lang\`.
 
 The pre-build step embeds `lang\*.lang` with `tools\embed_lang.ps1` (PowerShell); the PiPL
 resource is compiled with the SDK's `Cnvtpipl.exe`.
 
 Release archive: `powershell -ExecutionPolicy Bypass -File tools\make_release.ps1`
-→ `dist\VTFExport-<version>.zip`. The script refuses to pack a plug-in that contains the
+→ `dist\VTFBridge-<version>.zip`. The script refuses to pack a plug-in that contains the
 path of your build folder (it would reveal your user name).
 
 ### Tests
@@ -155,7 +180,7 @@ project; the real plug-in is always built against the real SDK.
 ## Project layout
 
 ```
-src/            plug-in source (VtfWriter/VtfReader/Resample are platform-independent)
+src/            plug-in source (VtfWriter/VtfReader/Resample/Vmt are platform-independent)
 lang/           translations embedded at build time (+ template.lang.txt)
 tools/          embed_lang (build), check_lang (translation checker), make_release
 tests/          test suite, sdk_stub for the fake hosts

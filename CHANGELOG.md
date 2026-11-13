@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.1.0
+
+- **Normal maps:** with the *Normal Map* flag the mipmaps are renormalized, so the bumps no longer
+  flatten out in the distance (gamma-correct filtering is skipped for normal maps).
+- **Optional `.vmt`** next to the saved texture: shader choice, `$basetexture` from the path after
+  `materials`, `$alphatest` / `$translucent` from the alpha, `AnimatedTexture` proxy for animations.
+  An existing `.vmt` is never overwritten.
+- The save dialog shows the estimated file size.
+- Tooltips for the texture flags and the material options.
+- *About* has a "Check for updates" link (opens the releases page; the plug-in itself does not go online).
+- Fixed: line breaks shown as `\n` in the Russian "not a power of two" message;
+  `tools/check_lang.py` now reports this mistake.
+- Renamed from **VTF Export** to **VTFBridge** (the plug-in opens files too, not only exports them).
+  The file is now `VTFBridge.8bi` — delete the old `VTFExport.8bi` from the Plug-ins folder.
+- Settings are moved automatically from `HKCU\Software\VTFExport` to `HKCU\Software\VTFBridge`.
+- Translations: the folder is now `VTFBridge_lang`; an existing `VTFExport_lang` folder is still
+  used while `VTFBridge_lang` does not exist.
+
 ## 1.0.0
 
 First public release.

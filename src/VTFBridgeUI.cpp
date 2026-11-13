@@ -1,8 +1,9 @@
-// VTFExportUI.cpp - Win32 options dialog, settings persistence, localisation glue.
+// VTFBridgeUI.cpp - Win32 options dialog, settings persistence, localisation glue.
 #include <windows.h>
 #include <commctrl.h>
 #include <shellapi.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -13,13 +14,38 @@
 
 #include "Lang.h"
 #include "Resample.h"
-#include "VTFExport.h"
+#include "VTFBridge.h"
 #include "Version.h"
+#include "Vmt.h"
 #include "resource.h"
 
 namespace {
 
-const wchar_t* kRegKey = L"Software\\VTFExport";
+const wchar_t* kRegKey = L"Software\\VTFBridge";
+// Settings key of versions before the rename (VTF Export 1.0).
+const wchar_t* kLegacyRegKey = L"Software\\VTFExport";
+
+// Moves the settings of VTF Export 1.0 to the new key once, so nothing is reset
+// after updating. Does nothing when the new key already exists.
+void MigrateLegacySettings() {
+    static bool done = false;
+    if (done) return;
+    done = true;
+    HKEY key;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, kRegKey, 0, KEY_READ, &key) == ERROR_SUCCESS) {
+        RegCloseKey(key);
+        return;
+    }
+    HKEY legacy;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, kLegacyRegKey, 0, KEY_READ, &legacy) != ERROR_SUCCESS) return;
+    bool copied = false;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, kRegKey, 0, nullptr, 0, KEY_ALL_ACCESS, nullptr, &key, nullptr) == ERROR_SUCCESS) {
+        copied = RegCopyTreeW(legacy, nullptr, key) == ERROR_SUCCESS;
+        RegCloseKey(key);
+    }
+    RegCloseKey(legacy);
+    if (copied) RegDeleteTreeW(HKEY_CURRENT_USER, kLegacyRegKey);
+}
 
 // One list: two "Auto" entries (format picked by whether the image has alpha)
 // and concrete formats (same format either way).
@@ -53,7 +79,7 @@ constexpr int kMaxSizeCount = int(sizeof(kMaxSizes) / sizeof(kMaxSizes[0]));
 const char* kResizeMethods[] = {"resize.nearest", "resize.biggest", "resize.smallest"};
 
 struct FlagItem { uint32_t flag; const char* key; };
-// Order must match the checkbox IDs in VTFExport.rc (IDC_FLAG_FIRST + index).
+// Order must match the checkbox IDs in VTFBridge.rc (IDC_FLAG_FIRST + index).
 const FlagItem kFlags[] = {
     {vtf::FLAG_POINTSAMPLE,     "flag.point_sample"},
     {vtf::FLAG_TRILINEAR,       "flag.trilinear"},
@@ -79,7 +105,12 @@ struct DialogState {
     int width, height;
     int visibleLayers;        // frames available for "layers -> animation"
     std::wstring langBefore;  // restored on Cancel
+    HWND tooltip = nullptr;
+    std::vector<std::wstring> tipTexts;  // must outlive the tooltip tools
 };
+
+// Tooltip key of a flag: "flag.clamp_s" -> "tip.clamp_s".
+std::string FlagTipKey(const char* flagKey) { return std::string("tip.") + (flagKey + 5); }
 
 int ComboSel(HWND dlg, int id) { return int(SendDlgItemMessageW(dlg, id, CB_GETCURSEL, 0, 0)); }
 
@@ -108,6 +139,7 @@ void WriteDword(HKEY key, const wchar_t* name, DWORD value) {
 }
 
 std::wstring ReadLanguageSetting() {
+    MigrateLegacySettings();
     wchar_t buf[64] = {0};
     DWORD size = sizeof(buf);
     if (RegGetValueW(HKEY_CURRENT_USER, kRegKey, L"Language", RRF_RT_REG_SZ, nullptr, buf, &size) == ERROR_SUCCESS)
@@ -116,6 +148,7 @@ std::wstring ReadLanguageSetting() {
 }
 
 void WriteLanguageSetting(const std::wstring& code) {
+    MigrateLegacySettings();
     HKEY key;
     if (RegCreateKeyExW(HKEY_CURRENT_USER, kRegKey, 0, nullptr, 0, KEY_WRITE, nullptr, &key, nullptr) != ERROR_SUCCESS)
         return;
@@ -147,11 +180,44 @@ void FillLanguages(HWND dlg) {
 
 void Collect(HWND dlg, vtf::Options& opt);
 
+// "171 KB", "1.4 MB" (units and decimal separator from the language file).
+std::wstring FormatBytes(uint64_t b) {
+    wchar_t buf[64];
+    if (b < 1024) {
+        std::swprintf(buf, 64, L"%llu", (unsigned long long)b);
+        return std::wstring(buf) + L" " + lang::T("unit.b");
+    }
+    if (b < 1024 * 1024) {
+        std::swprintf(buf, 64, L"%llu", (unsigned long long)((b + 512) / 1024));
+        return std::wstring(buf) + L" " + lang::T("unit.kb");
+    }
+    std::swprintf(buf, 64, L"%.1f", double(b) / (1024.0 * 1024.0));
+    std::wstring n = buf;
+    const std::wstring sep = lang::T("unit.decimal");
+    const size_t dot = n.find(L'.');
+    if (dot != std::wstring::npos && !sep.empty()) n.replace(dot, 1, sep);
+    return n + L" " + lang::T("unit.mb");
+}
+
 void UpdateInfo(HWND dlg, const DialogState* st) {
     vtf::Options tmp = *st->opt;
     Collect(dlg, tmp);
     uint32_t tw, th;
     vtf::TargetSize(uint32_t(st->width), uint32_t(st->height), tmp, tw, th);
+
+    // Estimated file size. Whether the image has alpha is not known yet, so the
+    // "Auto" formats show the range between their two formats.
+    const uint32_t frames = (tmp.animate && st->visibleLayers >= 2) ? uint32_t(st->visibleLayers) : 1u;
+    if (tw <= 65535 && th <= 65535) {
+        const uint64_t a = vtf::FileSize(tw, th, tmp.colorFormat, frames, tmp);
+        const uint64_t b = vtf::FileSize(tw, th, tmp.alphaFormat, frames, tmp);
+        const std::wstring size = a == b ? FormatBytes(a)
+                                         : FormatBytes(std::min(a, b)) + L" – " + FormatBytes(std::max(a, b));
+        SetDlgItemTextW(dlg, IDC_FILESIZE, lang::Tf("dlg.file_size", {{"size", size}}).c_str());
+    } else {
+        SetDlgItemTextW(dlg, IDC_FILESIZE, L"");
+    }
+
     std::wstring text;
     if (tw == uint32_t(st->width) && th == uint32_t(st->height))
         text = lang::Tf("dlg.size", {{"w", std::to_wstring(st->width)}, {"h", std::to_wstring(st->height)}});
@@ -177,9 +243,63 @@ void UpdateEnabled(HWND dlg, const DialogState* st) {
     EnableWindow(GetDlgItem(dlg, IDC_MIPFILTER), mips);
     EnableWindow(GetDlgItem(dlg, IDC_LBL_MIPFILTER), mips);
     EnableWindow(GetDlgItem(dlg, IDC_GAMMA), mips || resize);
+
+    // A normal map / SSBump is not a material of its own: no .vmt for it.
+    bool bump = false;
+    for (int i = 0; i < kFlagCount; ++i)
+        if ((kFlags[i].flag & (vtf::FLAG_NORMAL | vtf::FLAG_SSBUMP)) && IsDlgButtonChecked(dlg, IDC_FLAG_FIRST + i) == BST_CHECKED)
+            bump = true;
+    EnableWindow(GetDlgItem(dlg, IDC_VMT), !bump);
+    EnableWindow(GetDlgItem(dlg, IDC_SHADER), !bump && IsDlgButtonChecked(dlg, IDC_VMT) == BST_CHECKED);
 }
 
-void ApplyTexts(HWND dlg, const DialogState* st) {
+// Tooltips for the flags and the material options (texts follow the language).
+void AddTip(DialogState* st, HWND dlg, int id, const std::wstring& text) {
+    st->tipTexts.push_back(text);
+    TOOLINFOW ti = {};
+    ti.cbSize = sizeof(ti);
+    ti.uFlags = TTF_IDISHWND | TTF_SUBCLASS;
+    ti.hwnd = dlg;
+    ti.uId = reinterpret_cast<UINT_PTR>(GetDlgItem(dlg, id));
+    ti.lpszText = const_cast<wchar_t*>(st->tipTexts.back().c_str());
+    SendMessageW(st->tooltip, TTM_ADDTOOLW, 0, reinterpret_cast<LPARAM>(&ti));
+}
+
+void UpdateTips(DialogState* st, HWND dlg) {
+    if (!st->tooltip) {
+        INITCOMMONCONTROLSEX icc = {sizeof(icc), ICC_WIN95_CLASSES};
+        InitCommonControlsEx(&icc);
+        st->tooltip = CreateWindowExW(WS_EX_TOPMOST, TOOLTIPS_CLASSW, nullptr, WS_POPUP | TTS_ALWAYSTIP | TTS_NOPREFIX,
+                                      CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
+                                      dlg, nullptr, g_hInstance, nullptr);
+        if (!st->tooltip) return;
+        SendMessageW(st->tooltip, TTM_SETMAXTIPWIDTH, 0, 360);
+        SendMessageW(st->tooltip, TTM_SETDELAYTIME, TTDT_AUTOPOP, 20000);
+    } else {
+        // Remove the old tools, then add them again with the new texts.
+        for (int i = 0; i < kFlagCount; ++i) {
+            TOOLINFOW ti = {};
+            ti.cbSize = sizeof(ti);
+            ti.hwnd = dlg;
+            ti.uId = reinterpret_cast<UINT_PTR>(GetDlgItem(dlg, IDC_FLAG_FIRST + i));
+            SendMessageW(st->tooltip, TTM_DELTOOLW, 0, reinterpret_cast<LPARAM>(&ti));
+        }
+        for (int id : {IDC_VMT, IDC_SHADER}) {
+            TOOLINFOW ti = {};
+            ti.cbSize = sizeof(ti);
+            ti.hwnd = dlg;
+            ti.uId = reinterpret_cast<UINT_PTR>(GetDlgItem(dlg, id));
+            SendMessageW(st->tooltip, TTM_DELTOOLW, 0, reinterpret_cast<LPARAM>(&ti));
+        }
+    }
+    st->tipTexts.clear();
+    st->tipTexts.reserve(kFlagCount + 2);  // no reallocation: tools point into the strings
+    for (int i = 0; i < kFlagCount; ++i) AddTip(st, dlg, IDC_FLAG_FIRST + i, lang::T(FlagTipKey(kFlags[i].key).c_str()));
+    AddTip(st, dlg, IDC_VMT, lang::T("tip.vmt"));
+    AddTip(st, dlg, IDC_SHADER, lang::T("tip.shader"));
+}
+
+void ApplyTexts(HWND dlg, DialogState* st) {
     SetWindowTextW(dlg, lang::T("dlg.title").c_str());
     SetDlgItemTextW(dlg, IDC_LBL_LANG, lang::T("dlg.language").c_str());
     SetDlgItemTextW(dlg, IDC_GRP_FORMAT, lang::T("dlg.group_format").c_str());
@@ -205,9 +325,16 @@ void ApplyTexts(HWND dlg, const DialogState* st) {
     SetDlgItemTextW(dlg, IDOK, lang::T("dlg.save").c_str());
     SetDlgItemTextW(dlg, IDCANCEL, lang::T("dlg.cancel").c_str());
     for (int i = 0; i < kFlagCount; ++i) SetDlgItemTextW(dlg, IDC_FLAG_FIRST + i, lang::T(kFlags[i].key).c_str());
+    SetDlgItemTextW(dlg, IDC_GRP_VMT, lang::T("dlg.group_vmt").c_str());
+    SetDlgItemTextW(dlg, IDC_VMT, lang::T("dlg.vmt").c_str());
+    UpdateTips(st, dlg);
 
     // Lists (selection is kept by FillCombo).
-    std::vector<std::wstring> formats, filters, methods, sizes, orders;
+    std::vector<std::wstring> formats, filters, methods, sizes, orders, shaders;
+    for (int i = 0; i < vmt::SHADER_COUNT; ++i) {
+        const char* n = vmt::ShaderName(i);
+        shaders.push_back(std::wstring(n, n + std::strlen(n)));
+    }
     for (const FormatItem& f : kFormats) formats.push_back(FormatLabel(f));
     for (int f = 0; f < vtf::FILTER_COUNT; ++f) {
         const char* n = vtf::FilterName(f);
@@ -218,6 +345,7 @@ void ApplyTexts(HWND dlg, const DialogState* st) {
     for (uint32_t v : kMaxSizes) sizes.push_back(v ? std::to_wstring(v) : lang::T("dlg.no_limit"));
     FillCombo(dlg, IDC_FORMAT, formats);
     FillCombo(dlg, IDC_ORDER, orders);
+    FillCombo(dlg, IDC_SHADER, shaders);
     FillCombo(dlg, IDC_RFILTER, filters);
     FillCombo(dlg, IDC_MIPFILTER, filters);
     FillCombo(dlg, IDC_METHOD, methods);
@@ -262,6 +390,8 @@ void Fill(HWND dlg, const DialogState* st, const vtf::Options& opt) {
     CheckDlgButton(dlg, IDC_THUMB, opt.thumbnail ? BST_CHECKED : BST_UNCHECKED);
     for (int i = 0; i < kFlagCount; ++i)
         CheckDlgButton(dlg, IDC_FLAG_FIRST + i, (opt.flags & kFlags[i].flag) ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(dlg, IDC_VMT, opt.vmt ? BST_CHECKED : BST_UNCHECKED);
+    SendDlgItemMessageW(dlg, IDC_SHADER, CB_SETCURSEL, opt.vmtShader, 0);
     UpdateEnabled(dlg, st);
 }
 
@@ -292,6 +422,9 @@ void Collect(HWND dlg, vtf::Options& opt) {
     opt.flags = 0;
     for (int k = 0; k < kFlagCount; ++k)
         if (IsDlgButtonChecked(dlg, IDC_FLAG_FIRST + k) == BST_CHECKED) opt.flags |= kFlags[k].flag;
+    opt.vmt = IsDlgButtonChecked(dlg, IDC_VMT) == BST_CHECKED;
+    i = ComboSel(dlg, IDC_SHADER);
+    if (i >= 0 && i < vmt::SHADER_COUNT) opt.vmtShader = i;
 }
 
 INT_PTR CALLBACK DialogProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -343,12 +476,16 @@ INT_PTR CALLBACK DialogProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam) {
         case IDC_MIPMAPS:
         case IDC_RESIZE:
         case IDC_ANIMATE:
+        case IDC_THUMB:
+        case IDC_VMT:
             UpdateEnabled(dlg, st);
             UpdateInfo(dlg, st);
             return TRUE;
         case IDC_METHOD:
         case IDC_MAXW:
         case IDC_MAXH:
+        case IDC_FORMAT:
+        case IDC_VERSION:
             if (HIWORD(wParam) == CBN_SELCHANGE) UpdateInfo(dlg, st);
             return TRUE;
         case IDC_LANG:
@@ -365,6 +502,10 @@ INT_PTR CALLBACK DialogProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam) {
                 FillLanguages(dlg);  // "Auto (...)" text may change
             }
             return TRUE;
+        default:
+            if (LOWORD(wParam) >= IDC_FLAG_FIRST && LOWORD(wParam) < IDC_FLAG_FIRST + kFlagCount)
+                UpdateEnabled(dlg, st);  // Normal Map / SSBump disable the .vmt option
+            break;
         }
         break;
     }
@@ -381,6 +522,7 @@ vtf::Options DefaultOptions() {
 }
 
 vtf::Options LoadOptions() {
+    MigrateLegacySettings();
     vtf::Options o = DefaultOptions();
     HKEY key;
     if (RegOpenKeyExW(HKEY_CURRENT_USER, kRegKey, 0, KEY_READ, &key) != ERROR_SUCCESS) return o;
@@ -407,6 +549,8 @@ vtf::Options LoadOptions() {
     o.thumbnail = ReadDword(key, L"Thumbnail", o.thumbnail) != 0;
     o.flags = ReadDword(key, L"Flags", o.flags) & vtf::USER_FLAGS_MASK;
     o.frameOrder = int(ReadDword(key, L"FrameOrder", DWORD(o.frameOrder)));
+    o.vmt = ReadDword(key, L"Vmt", o.vmt) != 0;
+    o.vmtShader = int(ReadDword(key, L"VmtShader", DWORD(o.vmtShader)));
     o.animate = false;  // never remembered: depends on the document
     RegCloseKey(key);
     return SanitizeOptions(o);
@@ -430,10 +574,12 @@ vtf::Options SanitizeOptions(vtf::Options o) {
     if (MaxSizeIndex(o.maxWidth) == 0) o.maxWidth = 0;
     if (MaxSizeIndex(o.maxHeight) == 0) o.maxHeight = 0;
     o.flags &= vtf::USER_FLAGS_MASK;
+    if (o.vmtShader < 0 || o.vmtShader >= vmt::SHADER_COUNT) o.vmtShader = d.vmtShader;
     return o;
 }
 
 void SaveOptions(const vtf::Options& o) {
+    MigrateLegacySettings();
     HKEY key;
     if (RegCreateKeyExW(HKEY_CURRENT_USER, kRegKey, 0, nullptr, 0, KEY_WRITE, nullptr, &key, nullptr) != ERROR_SUCCESS)
         return;
@@ -451,6 +597,8 @@ void SaveOptions(const vtf::Options& o) {
     WriteDword(key, L"Thumbnail", o.thumbnail);
     WriteDword(key, L"Flags", o.flags);
     WriteDword(key, L"FrameOrder", DWORD(o.frameOrder));
+    WriteDword(key, L"Vmt", o.vmt);
+    WriteDword(key, L"VmtShader", DWORD(o.vmtShader));
     RegCloseKey(key);
 }
 
@@ -460,7 +608,14 @@ std::wstring LanguageFolder() {
     std::wstring p(path, n);
     const size_t slash = p.find_last_of(L"\\/");
     p = slash == std::wstring::npos ? std::wstring() : p.substr(0, slash);
-    return p + L"\\VTFExport_lang";
+    const std::wstring folder = p + L"\\VTFBridge_lang";
+    // Folder name of versions before the rename, used while the new one does not exist.
+    const std::wstring legacy = p + L"\\VTFExport_lang";
+    const auto isDir = [](const std::wstring& d) {
+        const DWORD a = GetFileAttributesW(d.c_str());
+        return a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY);
+    };
+    return !isDir(folder) && isDir(legacy) ? legacy : folder;
 }
 
 void InitLanguage() {
@@ -471,7 +626,7 @@ void InitLanguage() {
 // --- UI entry points ---------------------------------------------------------------
 
 bool ShowOptionsDialog(HWND parent, vtf::Options& opt, int width, int height, int visibleLayers) {
-    DialogState st{&opt, width, height, visibleLayers, lang::Setting()};
+    DialogState st{&opt, width, height, visibleLayers, lang::Setting(), nullptr, {}};
     const INT_PTR r = DialogBoxParamW(g_hInstance, MAKEINTRESOURCEW(IDD_VTF_OPTIONS), parent,
                                       DialogProc, reinterpret_cast<LPARAM>(&st));
     return r == IDOK;
@@ -501,8 +656,9 @@ HRESULT CALLBACK AboutCallback(HWND, UINT msg, WPARAM, LPARAM lParam, LONG_PTR) 
 
 void ShowAbout(HWND parent) {
     InitLanguage();
-    const std::wstring url = L"" VTFEXPORT_URL;
-    const std::wstring text = lang::Tf("about.text", {{"folder", LanguageFolder()}, {"version", L"" VTFEXPORT_VERSION_STR}});
+    const std::wstring url = L"" VTFBRIDGE_URL;
+    const std::wstring releases = url + L"/releases/latest";  // "check for updates": just opens the page
+    const std::wstring text = lang::Tf("about.text", {{"folder", LanguageFolder()}, {"version", L"" VTFBRIDGE_VERSION_STR}});
     const std::wstring title = lang::T("about.title");
 
     // Task dialog with a clickable link (comctl32 v6, which Photoshop loads);
@@ -512,7 +668,8 @@ void ShowAbout(HWND parent) {
     if (!comctl) comctl = LoadLibraryW(L"comctl32.dll");
     auto taskDialog = comctl ? reinterpret_cast<TaskDialogIndirectFn>(GetProcAddress(comctl, "TaskDialogIndirect")) : nullptr;
     if (taskDialog) {
-        const std::wstring content = text + L"\n\n<a href=\"" + url + L"\">" + url + L"</a>";
+        const std::wstring content = text + L"\n\n<a href=\"" + url + L"\">" + url + L"</a>\n<a href=\"" + releases +
+                                     L"\">" + lang::T("about.updates") + L"</a>";
         TASKDIALOGCONFIG cfg = {};
         cfg.cbSize = sizeof(cfg);
         cfg.hwndParent = parent;
@@ -525,5 +682,6 @@ void ShowAbout(HWND parent) {
         cfg.pfCallback = AboutCallback;
         if (SUCCEEDED(taskDialog(&cfg, nullptr, nullptr, nullptr))) return;
     }
-    MessageBoxW(parent, (text + L"\n\n" + url).c_str(), title.c_str(), MB_OK | MB_ICONINFORMATION);
+    MessageBoxW(parent, (text + L"\n\n" + url + L"\n" + lang::T("about.updates") + L": " + releases).c_str(), title.c_str(),
+                MB_OK | MB_ICONINFORMATION);
 }

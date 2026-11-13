@@ -1,4 +1,4 @@
-// VTFExport.cpp - Photoshop File Format plug-in entry point (open + save VTF).
+// VTFBridge.cpp - Photoshop File Format plug-in entry point (open + save VTF).
 //
 // Save ("Save a Copy" / "Save As"):
 //   Options*  -> show dialog, remember options (also per document via revertInfo)
@@ -25,9 +25,10 @@
 #include <vector>
 
 #include "Lang.h"
-#include "VTFExport.h"
+#include "VTFBridge.h"
 #include "VtfReader.h"
 #include "VtfWriter.h"
+#include "Vmt.h"
 
 HINSTANCE g_hInstance = nullptr;
 
@@ -96,6 +97,22 @@ bool IsRGBMode(int16 mode) {
 }
 
 std::wstring Widen(const std::string& s) { return std::wstring(s.begin(), s.end()); }
+
+std::string ToUtf8(const std::wstring& s) {
+    if (s.empty()) return std::string();
+    const int n = WideCharToMultiByte(CP_UTF8, 0, s.data(), int(s.size()), nullptr, 0, nullptr, nullptr);
+    std::string out(size_t(n > 0 ? n : 0), '\0');
+    if (n > 0) WideCharToMultiByte(CP_UTF8, 0, s.data(), int(s.size()), &out[0], n, nullptr, nullptr);
+    return out;
+}
+
+std::wstring FromUtf8(const std::string& s) {
+    if (s.empty()) return std::wstring();
+    const int n = MultiByteToWideChar(CP_UTF8, 0, s.data(), int(s.size()), nullptr, 0);
+    std::wstring out(size_t(n > 0 ? n : 0), L'\0');
+    if (n > 0) MultiByteToWideChar(CP_UTF8, 0, s.data(), int(s.size()), &out[0], n);
+    return out;
+}
 
 // ---------------------------------------------------------------------------
 // Per-document settings (revertInfo): lets "Save" on an opened VTF reuse its
@@ -652,6 +669,64 @@ void DoEstimateStart(FormatRecordPtr fr) {
     fr->data = nullptr;
 }
 
+// ---------------------------------------------------------------------------
+// Optional .vmt next to the saved .vtf.
+
+// Path of the file being saved: finalSpec (where the file ends up, even if
+// Photoshop writes to a temporary file first), else the path of the open handle
+// when it is a .vtf. Empty if unknown.
+std::wstring SavedFilePath(FormatRecordPtr fr) {
+    if (fr->finalSpec && fr->finalSpec[0])
+        return std::wstring(reinterpret_cast<const wchar_t*>(fr->finalSpec));
+    wchar_t buf[32768];
+    const DWORD n = GetFinalPathNameByHandleW(FileHandle(fr), buf, DWORD(sizeof(buf) / sizeof(buf[0])), FILE_NAME_NORMALIZED);
+    if (n == 0 || n >= sizeof(buf) / sizeof(buf[0])) return std::wstring();
+    std::wstring p(buf, n);
+    if (p.compare(0, 8, L"\\\\?\\UNC\\") == 0) p = L"\\\\" + p.substr(8);
+    else if (p.compare(0, 4, L"\\\\?\\") == 0) p = p.substr(4);
+    if (p.size() < 4 || _wcsicmp(p.c_str() + p.size() - 4, L".vtf") != 0) return std::wstring();
+    return p;
+}
+
+bool FormatKeepsAlpha(int32_t f) {
+    switch (f) {
+    case vtf::FMT_DXT3: case vtf::FMT_DXT5: case vtf::FMT_BGRA8888: case vtf::FMT_RGBA8888:
+    case vtf::FMT_BGRA4444: case vtf::FMT_BGRA5551: case vtf::FMT_IA88: case vtf::FMT_A8:
+        return true;
+    default:
+        return false;
+    }
+}
+
+// Writes "<name>.vmt" unless it already exists (never overwrites a material the
+// user may have edited). Failures only show a warning: the .vtf is already saved.
+void WriteVmt(FormatRecordPtr fr, const vtf::Options& opt, const std::vector<std::vector<uint8_t>>& frames, uint32_t pixels) {
+    const std::wstring vtfPath = SavedFilePath(fr);
+    if (vtfPath.empty()) {
+        ShowWarning(ParentWindow(fr), lang::T("msg.vmt_no_path"));
+        return;
+    }
+    vmt::Alpha alpha = vmt::ALPHA_NONE;
+    for (const auto& f : frames) {
+        const vmt::Alpha a = vmt::ClassifyAlpha(f.data(), pixels);
+        if (a > alpha) alpha = a;
+    }
+    if (!FormatKeepsAlpha(vtf::ResolveFormat(opt, alpha != vmt::ALPHA_NONE))) alpha = vmt::ALPHA_NONE;
+    const std::string u8 = ToUtf8(vtfPath);
+    const std::wstring vmtPath = FromUtf8(vmt::VmtPath(u8));
+    const std::string text = vmt::Build(vmt::BaseTexture(u8), opt.vmtShader, alpha, uint32_t(frames.size()));
+    HANDLE h = CreateFileW(vmtPath.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) {
+        if (GetLastError() != ERROR_FILE_EXISTS)
+            ShowWarning(ParentWindow(fr), lang::Tf("msg.vmt_error", {{"path", vmtPath}}));
+        return;
+    }
+    DWORD written = 0;
+    const bool ok = WriteFile(h, text.data(), DWORD(text.size()), &written, nullptr) && written == text.size();
+    CloseHandle(h);
+    if (!ok) ShowWarning(ParentWindow(fr), lang::Tf("msg.vmt_error", {{"path", vmtPath}}));
+}
+
 void DoWriteStart(FormatRecordPtr fr, int16* result) {
     Use32BitCoords(fr);
     const HWND parent = ParentWindow(fr);
@@ -690,9 +765,12 @@ void DoWriteStart(FormatRecordPtr fr, int16* result) {
         return;
     }
 
-    frames.clear();
     const OSErr err = WriteToDataFork(fr, file);
-    if (err != noErr) *result = err;
+    if (err != noErr) {
+        *result = err;
+        return;
+    }
+    if (opt.vmt && !(opt.flags & (vtf::FLAG_NORMAL | vtf::FLAG_SSBUMP))) WriteVmt(fr, opt, frames, uint32_t(w) * uint32_t(h));
 }
 
 } // namespace

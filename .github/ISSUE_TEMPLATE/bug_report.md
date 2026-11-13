@@ -15,7 +15,7 @@ labels: bug
 2.
 
 **Environment**
-- Plug-in version (Help → About Plug-In → VTF Export):
+- Plug-in version (Help → About Plug-In → VTFBridge):
 - Photoshop version:
 - Windows version:
 - Document: mode (RGB / Grayscale), bits per channel, number of layers:

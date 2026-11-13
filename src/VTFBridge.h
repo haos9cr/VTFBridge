@@ -1,4 +1,4 @@
-// VTFExport.h - shared declarations between plug-in entry point and UI.
+// VTFBridge.h - shared declarations between plug-in entry point and UI.
 #pragma once
 
 #include <windows.h>
@@ -10,16 +10,16 @@
 // Module handle of this .8bi (set in DllMain).
 extern HINSTANCE g_hInstance;
 
-// Loads last used options from HKCU\Software\VTFExport (or defaults).
+// Loads last used options from HKCU\Software\VTFBridge (or defaults).
 vtf::Options LoadOptions();
-// Stores options to HKCU\Software\VTFExport.
+// Stores options to HKCU\Software\VTFBridge.
 void SaveOptions(const vtf::Options& opt);
 // Default options (Auto DXT1 / DXT5, 7.2, Box mipmaps + thumbnail, no resize).
 vtf::Options DefaultOptions();
 // Replaces out-of-range values (unknown formats, filters, sizes) with defaults.
 vtf::Options SanitizeOptions(vtf::Options opt);
 
-// "<folder of the .8bi>\VTFExport_lang".
+// "<folder of the .8bi>\VTFBridge_lang".
 std::wstring LanguageFolder();
 // Rescans languages and applies the saved language setting.
 void InitLanguage();

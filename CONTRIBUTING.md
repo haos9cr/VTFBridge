@@ -24,7 +24,7 @@ Thanks for helping! Translations are the easiest way to contribute — no C++ ne
    ```
    It reports unknown keys (typos), changed placeholders and duplicate language codes.
    The same check runs automatically on every pull request.
-5. Try it without building: put the file into the `VTFExport_lang` folder next to `VTFExport.8bi`
+5. Try it without building: put the file into the `VTFBridge_lang` folder next to `VTFBridge.8bi`
    and open the save dialog — the language appears in the list (the dialog re-reads the folder
    every time). Make sure the texts fit in the dialog.
 6. Open a pull request with just your `.lang` file.
@@ -46,7 +46,7 @@ Until then the English text is shown.
   tests/run_tests.sh            # core tests
   tests/run_tests.sh --wine     # + plug-in tests under Wine (MinGW + Wine)
   ```
-- `src/VtfWriter.*`, `src/VtfReader.*` and `src/Resample.*` don't depend on Windows or the SDK —
+- `src/VtfWriter.*`, `src/VtfReader.*`, `src/Resample.*` and `src/Vmt.*` don't depend on Windows or the SDK —
   keep it that way, so they stay testable on any platform.
 - New user-visible text: add the key with its English text to `kStrings` in `src/Lang.cpp`,
   regenerate the template (`tests/lang_test.cpp --template`, or add the line by hand) and add the
@@ -58,5 +58,5 @@ Until then the English text is shown.
 
 1. Bump the version in `src/Version.h`, add a section to `CHANGELOG.md`.
 2. Build **Release | x64**.
-3. `powershell -ExecutionPolicy Bypass -File tools\make_release.ps1` → `dist\VTFExport-<version>.zip`.
+3. `powershell -ExecutionPolicy Bypass -File tools\make_release.ps1` → `dist\VTFBridge-<version>.zip`.
 4. Create a GitHub release with the tag `v<version>`, paste the changelog section, attach the zip.

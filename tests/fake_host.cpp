@@ -1,4 +1,4 @@
-// fake_host.cpp - loads VTFExport.8bi like Photoshop would and drives the
+// fake_host.cpp - loads VTFBridge.8bi like Photoshop would and drives the
 // Estimate/Write selectors with synthetic images. Compiled against the stub
 // SDK header (field names match the real SDK) and run under Wine.
 #include <windows.h>
@@ -50,7 +50,8 @@ static OSErr AdvanceState() {
 }
 
 static bool RunCase(PluginMainFn main, const char* name, int w, int h, int depth, int planes, bool gray,
-                    const std::string& outDir) {
+                    const std::string& outDir, const std::string& outFile = std::string(),
+                    const wchar_t* finalSpec = nullptr) {
     g_w = w; g_h = h; g_bps = depth / 8; g_planes = planes; g_gray = gray; g_calls = 0;
     g_src.resize(size_t(w) * h * 4);
     for (int y = 0; y < h; ++y)
@@ -77,7 +78,8 @@ static bool RunCase(PluginMainFn main, const char* name, int w, int h, int depth
     g_fr.HostSupports32BitCoordinates = 1;
     g_fr.advanceState = AdvanceState;
 
-    std::string out = outDir + "\\" + name + ".vtf";
+    g_fr.finalSpec = reinterpret_cast<uint16*>(const_cast<wchar_t*>(finalSpec));
+    std::string out = outFile.empty() ? outDir + "\\" + name + ".vtf" : outFile;
     HANDLE hf = CreateFileA(out.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     g_fr.dataFork = reinterpret_cast<intptr_t>(hf);
 
@@ -99,7 +101,7 @@ int main(int argc, char** argv) {
     if (argc < 4) { std::printf("usage: fake_host plugin.8bi outdir format\n"); return 2; }
     // Choose output format through the plug-in's own settings key.
     HKEY key;
-    RegCreateKeyExA(HKEY_CURRENT_USER, "Software\\VTFExport", 0, nullptr, 0, KEY_WRITE, nullptr, &key, nullptr);
+    RegCreateKeyExA(HKEY_CURRENT_USER, "Software\\VTFBridge", 0, nullptr, 0, KEY_WRITE, nullptr, &key, nullptr);
     DWORD fmt = DWORD(atoi(argv[3])), ver = 5, one = 1;
     RegSetValueExA(key, "Format", 0, REG_DWORD, (BYTE*)&fmt, 4);
     RegSetValueExA(key, "Version", 0, REG_DWORD, (BYTE*)&ver, 4);
@@ -121,6 +123,58 @@ int main(int argc, char** argv) {
     bad += !RunCase(main, "gray8_alpha", 128, 64, 8, 2, true, out);
     bad += !RunCase(main, "gray16", 128, 64, 16, 1, true, out);
     bad += !RunCase(main, "rgb32_big_strips", 4096, 1024, 32, 4, false, out);  // several strips
+
+    // Optional .vmt (settings: Vmt=1, UnlitGeneric).
+    {
+        HKEY k;
+        RegCreateKeyExA(HKEY_CURRENT_USER, "Software\\VTFBridge", 0, nullptr, 0, KEY_WRITE, nullptr, &k, nullptr);
+        DWORD one = 1, unlit = 2, flags = 0, dxt = 1000;
+        RegSetValueExA(k, "Vmt", 0, REG_DWORD, (BYTE*)&one, 4);
+        RegSetValueExA(k, "VmtShader", 0, REG_DWORD, (BYTE*)&unlit, 4);
+        RegSetValueExA(k, "Flags", 0, REG_DWORD, (BYTE*)&flags, 4);
+        RegSetValueExA(k, "Format", 0, REG_DWORD, (BYTE*)&dxt, 4);
+        RegDeleteValueA(k, "ColorFormat");
+        RegCloseKey(k);
+        const std::string mat = out + "\\materials\\models\\test";
+        CreateDirectoryA((out + "\\materials").c_str(), nullptr);
+        CreateDirectoryA((out + "\\materials\\models").c_str(), nullptr);
+        CreateDirectoryA(mat.c_str(), nullptr);
+        auto readText = [](const std::string& path) {
+            std::string t; FILE* f = std::fopen(path.c_str(), "rb");
+            if (!f) return std::string("<missing>");
+            char buf[4096]; size_t n;
+            while ((n = std::fread(buf, 1, sizeof(buf), f)) > 0) t.append(buf, n);
+            std::fclose(f); return t;
+        };
+        auto check = [&](bool ok, const char* what) { std::printf("%s vmt: %s\n", ok ? "OK  " : "FAIL", what); bad += !ok; };
+
+        // 1) Path from the open handle; soft alpha -> $translucent.
+        RunCase(main, "vmt_soft", 64, 64, 8, 4, false, out, mat + "\\soft.vtf");
+        std::string t = readText(mat + "\\soft.vmt");
+        check(t.find("\"UnlitGeneric\"") == 0 && t.find("\"$basetexture\" \"models/test/soft\"") != std::string::npos &&
+              t.find("$translucent") != std::string::npos, "from handle path, $translucent");
+        // 2) An existing .vmt is never overwritten.
+        FILE* f = std::fopen((mat + "\\keep.vmt").c_str(), "wb"); std::fputs("mine", f); std::fclose(f);
+        RunCase(main, "vmt_keep", 64, 64, 8, 3, false, out, mat + "\\keep.vtf");
+        check(readText(mat + "\\keep.vmt") == "mine", "existing file kept");
+        // 3) finalSpec wins over the handle (Photoshop may write to a temporary file).
+        std::wstring final = std::wstring(mat.begin(), mat.end()) + L"\\final.vtf";
+        RunCase(main, "vmt_final", 64, 64, 8, 3, false, out, out + "\\temp_save.tmp", final.c_str());
+        t = readText(mat + "\\final.vmt");
+        check(t.find("models/test/final") != std::string::npos && t.find("$translucent") == std::string::npos &&
+              t.find("$alphatest") == std::string::npos, "path from finalSpec, opaque");
+        check(readText(out + "\\temp_save.vmt") == "<missing>", "nothing next to the temporary file");
+        // 4) Normal maps get no material.
+        k = nullptr;
+        RegCreateKeyExA(HKEY_CURRENT_USER, "Software\\VTFBridge", 0, nullptr, 0, KEY_WRITE, nullptr, &k, nullptr);
+        flags = 0x80; RegSetValueExA(k, "Flags", 0, REG_DWORD, (BYTE*)&flags, 4);
+        RegCloseKey(k);
+        RunCase(main, "vmt_normal", 64, 64, 8, 3, false, out, mat + "\\normal.vtf");
+        check(readText(mat + "\\normal.vmt") == "<missing>", "no .vmt for a normal map");
+        RegCreateKeyExA(HKEY_CURRENT_USER, "Software\\VTFBridge", 0, nullptr, 0, KEY_WRITE, nullptr, &k, nullptr);
+        RegDeleteValueA(k, "Vmt"); RegDeleteValueA(k, "Flags");
+        RegCloseKey(k);
+    }
     std::printf("failed cases: %d\n", bad);
     return bad;
 }

@@ -119,7 +119,7 @@ static std::string Utf8(const uint16* s) {
 
 static void SetReg(const char* name, DWORD v) {
     HKEY key;
-    RegCreateKeyExA(HKEY_CURRENT_USER, "Software\\VTFExport", 0, nullptr, 0, KEY_WRITE, nullptr, &key, nullptr);
+    RegCreateKeyExA(HKEY_CURRENT_USER, "Software\\VTFBridge", 0, nullptr, 0, KEY_WRITE, nullptr, &key, nullptr);
     RegSetValueExA(key, name, 0, REG_DWORD, (BYTE*)&v, 4);
     RegCloseKey(key);
 }
@@ -198,7 +198,7 @@ int main(int argc, char** argv) {
 
     for (int order = 0; order < 2; ++order) {
         std::printf("[order %s]\n", order ? "top-down" : "bottom-up");
-        RegDeleteKeyA(HKEY_CURRENT_USER, "Software\\VTFExport");
+        RegDeleteKeyA(HKEY_CURRENT_USER, "Software\\VTFBridge");
         SetReg("FrameOrder", DWORD(order));
         SetReg("ColorFormat", 12); SetReg("AlphaFormat", 12);  // irrelevant: revert decides
 
@@ -247,7 +247,7 @@ int main(int argc, char** argv) {
     // 4. Document not from an animation (no revertInfo): animate stays off -> merged single frame.
     {
         std::printf("[multi-layer document, not from a VTF]\n");
-        RegDeleteKeyA(HKEY_CURRENT_USER, "Software\\VTFExport");
+        RegDeleteKeyA(HKEY_CURRENT_USER, "Software\\VTFBridge");
         std::memset(&g_fr, 0, sizeof(g_fr));
         g_fr.HostSupports32BitCoordinates = 1;
         g_fr.handleProcs = &g_hp;

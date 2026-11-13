@@ -2,7 +2,7 @@
 //
 // English is compiled in. Other languages are .lang files (UTF-8, "key = value"
 // lines): embedded at build time from the project's lang\ folder, and/or put
-// into "<plugin folder>\VTFExport_lang\". Files next to the plug-in win, key by
+// into "<plugin folder>\VTFBridge_lang\". Files next to the plug-in win, key by
 // key. A file is accepted when it defines language.name and at least one known
 // key; missing keys fall back to English.
 #pragma once

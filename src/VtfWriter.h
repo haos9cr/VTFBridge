@@ -94,6 +94,8 @@ struct Options {
     // Plug-in level (not used by the encoder itself).
     bool     animate        = false;      // save visible layers as animation frames
     int      frameOrder     = 0;          // FRAME_ORDER_*
+    bool     vmt            = false;      // also write a .vmt next to the .vtf (if none exists)
+    int      vmtShader      = 0;          // vmt::Shader
 };
 
 enum FrameOrder : int {
@@ -112,6 +114,10 @@ void TargetSize(uint32_t w, uint32_t h, const Options& opt, uint32_t& tw, uint32
 
 // Size in bytes of one image of the given format.
 uint32_t ImageSize(int32_t format, uint32_t width, uint32_t height);
+
+// Exact size of the .vtf file Write() produces for a texture of texW x texH
+// (the size after resizing, see TargetSize) in format `fmt` with `frames` frames.
+uint64_t FileSize(uint32_t texW, uint32_t texH, int32_t fmt, uint32_t frames, const Options& opt);
 
 // True if (w, h) are powers of two.
 bool IsPowerOfTwo(uint32_t v);

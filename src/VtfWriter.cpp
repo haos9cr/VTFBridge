@@ -210,6 +210,22 @@ const char* FormatName(int32_t f) {
 
 namespace {
 
+// Normal maps: filtering averages the vectors, which makes them shorter, so lower
+// mips look flatter than they should. Scale every RGB vector (decoded as
+// 2*c-1) back to unit length. Alpha (often a specular mask) is left alone.
+void RenormalizeNormals(FloatImage& img) {
+    float* p = img.px.data();
+    for (size_t i = 0, n = size_t(img.w) * img.h; i < n; ++i, p += 4) {
+        float x = p[0] * 2.f - 1.f, y = p[1] * 2.f - 1.f, z = p[2] * 2.f - 1.f;
+        const float len = std::sqrt(x * x + y * y + z * z);
+        if (len > 1e-4f) { x /= len; y /= len; z /= len; }
+        else { x = 0.f; y = 0.f; z = 1.f; }
+        p[0] = x * .5f + .5f;
+        p[1] = y * .5f + .5f;
+        p[2] = z * .5f + .5f;
+    }
+}
+
 // Base level (optionally resized to a power of two) + full mip chain down to 1x1.
 // Each level is filtered from the previous one in float, so rounding does not accumulate.
 std::vector<Image> BuildChain(const uint8_t* rgba, uint32_t width, uint32_t height, const Options& opt) {
@@ -217,7 +233,10 @@ std::vector<Image> BuildChain(const uint8_t* rgba, uint32_t width, uint32_t heig
     // mips/resizes of tiling textures then stay seamless.
     const bool wrapX = !(opt.flags & FLAG_CLAMPS);
     const bool wrapY = !(opt.flags & FLAG_CLAMPT);
-    const bool gamma = opt.gammaFilter;
+    // Normal maps (not SSBump: its three vectors are not unit length) hold
+    // directions, not colours: no gamma, renormalised after every filter step.
+    const bool normal = (opt.flags & FLAG_NORMAL) && !(opt.flags & FLAG_SSBUMP);
+    const bool gamma = opt.gammaFilter && !normal;
 
     uint32_t tw0, th0;
     TargetSize(width, height, opt, tw0, th0);
@@ -227,6 +246,7 @@ std::vector<Image> BuildChain(const uint8_t* rgba, uint32_t width, uint32_t heig
     if (resized || tw0 > 1 || th0 > 1) level = ToFloat(rgba, width, height, gamma);
     if (resized) {
         level = Resample(level, tw0, th0, Filter(opt.resizeFilter), wrapX, wrapY);
+        if (normal) RenormalizeNormals(level);
         chain[0].w = tw0;
         chain[0].h = th0;
         ToBytes(level, gamma, chain[0].px);
@@ -238,6 +258,7 @@ std::vector<Image> BuildChain(const uint8_t* rgba, uint32_t width, uint32_t heig
     while (chain.back().w > 1 || chain.back().h > 1) {
         level = Resample(level, std::max(1u, level.w / 2), std::max(1u, level.h / 2),
                          Filter(opt.mipFilter), wrapX, wrapY);
+        if (normal) RenormalizeNormals(level);
         Image m;
         m.w = level.w;
         m.h = level.h;
@@ -248,6 +269,26 @@ std::vector<Image> BuildChain(const uint8_t* rgba, uint32_t width, uint32_t heig
 }
 
 } // namespace
+
+uint64_t FileSize(uint32_t texW, uint32_t texH, int32_t fmt, uint32_t frames, const Options& opt) {
+    if (texW == 0 || texH == 0) return 0;
+    const int v = opt.versionMinor;
+    uint64_t size = v <= 1 ? 64 : v == 2 ? 80 : 80 + (opt.thumbnail ? 2u : 1u) * 8;
+    if (opt.thumbnail) {
+        uint32_t tw, th;
+        ThumbnailSize(texW, texH, tw, th);
+        size += ImageSize(FMT_DXT1, tw, th);
+    }
+    uint64_t mips = 0;
+    uint32_t w = texW, h = texH;
+    for (;;) {
+        mips += ImageSize(fmt, w, h);
+        if (!opt.mipmaps || (w == 1 && h == 1)) break;
+        w = std::max(1u, w / 2);
+        h = std::max(1u, h / 2);
+    }
+    return size + mips * frames;
+}
 
 bool Write(const uint8_t* rgba, uint32_t width, uint32_t height,
            const Options& opt, std::vector<uint8_t>& out, std::string& error) {

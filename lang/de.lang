@@ -1,4 +1,4 @@
-# VTF Export - Deutsch
+# VTFBridge - Deutsch
 language.name = Deutsch
 language.code = de
 
@@ -39,12 +39,38 @@ dlg.group_flags = Textur-Flags
 dlg.reset = Zurücksetzen
 dlg.save = Speichern
 dlg.cancel = Abbrechen
+dlg.file_size = Geschätzte Dateigröße: {size}
+dlg.group_vmt = Material
+dlg.vmt = .vmt erstellen (falls nicht vorhanden)
+unit.b = B
+unit.kb = KB
+unit.mb = MB
+unit.decimal = ,
 
 fmt.auto_dxt = Automatisch: DXT1 (ohne Alpha) / DXT5 (mit Alpha)
 fmt.auto_raw = Automatisch: BGR888 / BGRA8888 (unkomprimiert)
 fmt.i8 = I8 (Graustufen)
 fmt.ia88 = IA88 (Graustufen + Alpha)
 fmt.a8 = A8 (nur Alpha)
+
+tip.point_sample = Keine Glättung zwischen Pixeln: scharfer, pixeliger Look (Pixel-Art, manche UI).
+tip.trilinear = Trilineare Filterung: weicher Übergang zwischen den Mipmap-Stufen.
+tip.anisotropic = Anisotrope Filterung: die Textur bleibt auch unter flachem Blickwinkel scharf.
+tip.clamp_s = Textur horizontal nicht wiederholen: stattdessen werden die Randpixel gestreckt.\nMipmaps und Skalierung greifen dann auch nicht über den linken/rechten Rand.
+tip.clamp_t = Textur vertikal nicht wiederholen: stattdessen werden die Randpixel gestreckt.\nMipmaps und Skalierung greifen dann auch nicht über den oberen/unteren Rand.
+tip.clamp_u = In der Tiefe nicht wiederholen (nur Volumentexturen).
+tip.no_mipmap = Die Engine verwendet nur das Bild in voller Größe. Typisch für UI und HUD.
+tip.no_lod = Immer die volle Auflösung laden, unabhängig von der Texturqualität.\nTypisch für UI und HUD.
+tip.normal_map = Die Textur ist eine Normal Map. Mipmaps werden renormalisiert, damit das Relief\nin der Ferne nicht flach wird; gammakorrekte Filterung wird nicht angewendet.
+tip.ssbump = Selbstschattierende Bump Map (z. B. mit height2ssbump erstellt).\nZusammen mit "$ssbump" "1" im Material verwenden.
+tip.hint_dxt5 = Für Skybox-Texturen: hilft, sichtbare Nähte an den Rändern zu vermeiden.
+tip.srgb = Markiert die Textur als sRGB. Selten nötig: die meisten Source-Spiele ignorieren es.
+tip.no_debug_override = Nimmt die Textur von den Debug-Ersetzungen der Engine aus.
+tip.single_copy = Die Engine hält nur eine Kopie dieser Textur im Speicher.
+tip.vertex_texture = Textur für Vertex-Shader. Selten nötig.
+tip.border = Randfarbe statt der Randpixel verwenden. Selten nötig.
+tip.vmt = Erstellt zusätzlich ein Material neben der .vtf. $basetexture ist der Pfad nach dem\nOrdner „materials“. Alpha ergibt $alphatest (Ausschnitt) oder $translucent (weich),\nmehrere Frames den Proxy AnimatedTexture.\nEine vorhandene .vmt wird nie überschrieben. Nicht für Normal Maps.
+tip.shader = VertexLitGeneric: Modelle\nLightmappedGeneric: Map-Geometrie (Brushes)\nUnlitGeneric: Sprites, UI, ohne Beleuchtung
 
 layer.frame = Frame {n}
 
@@ -59,6 +85,9 @@ msg.cubemap = - sie ist eine Cubemap ({faces} Seiten): nur die erste Seite wird 
 msg.volume = - sie ist eine Volumentextur ({depth} Schichten): nur die erste Schicht wird geöffnet;
 msg.format_note = Format: {format}
 msg.layer_error = Die Ebene „{name}“ des Dokuments kann nicht gelesen werden.
+msg.vmt_error = Die Textur wurde gespeichert, aber das Material konnte nicht geschrieben werden:\n{path}
+msg.vmt_no_path = Die Textur wurde gespeichert, aber ihr Ordner ist unbekannt, daher wurde keine .vmt erstellt.
 
-about.title = Über VTF Export
-about.text = VTF Export {version} für Adobe Photoshop (x64)\n\nÖffnet und speichert Valve-Texture-Format-Dateien (.vtf).\nAnimierte Texturen werden als Ebenen geöffnet; sichtbare Ebenen können als Frames gespeichert werden.\nSpeichern: DXT1/3/5, BGR(A)8888, RGB(A)8888, 565/4444/5551, I8, IA88, A8,\nSkalierung auf Zweierpotenz, Mipmaps mit 15 Filtern, Vorschaubild, Flags, Versionen 7.1 - 7.5.\n\nSprachordner: {folder}\n\nDXT-Kompression: stb_dxt (Public Domain).
+about.title = Über VTFBridge
+about.updates = Nach Updates suchen
+about.text = VTFBridge {version} für Adobe Photoshop (x64)\n\nÖffnet und speichert Valve-Texture-Format-Dateien (.vtf).\nAnimierte Texturen werden als Ebenen geöffnet; sichtbare Ebenen können als Frames gespeichert werden.\nSpeichern: DXT1/3/5, BGR(A)8888, RGB(A)8888, 565/4444/5551, I8, IA88, A8,\nSkalierung auf Zweierpotenz, Mipmaps mit 15 Filtern, Vorschaubild, Flags, Versionen 7.1 - 7.5,\noptional ein .vmt-Material.\n\nSprachordner: {folder}\n\nDXT-Kompression: stb_dxt (Public Domain).

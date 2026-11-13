@@ -38,6 +38,10 @@ int main(int argc, char** argv) {
         o.mipmaps = c.mips;
         std::vector<uint8_t> file; std::string err;
         CHECK(vtf::Write(ptrs, W, H, o, file, err), "%s write: %s", c.name, err.c_str());
+        {
+            const int32_t fmt = int32_t(file[52] | (file[53] << 8) | (file[54] << 16) | (file[55] << 24));
+            CHECK(vtf::FileSize(W, H, fmt, c.frames, o) == file.size(), "%s FileSize", c.name);
+        }
         FILE* fp = std::fopen((dir + "/" + c.name + ".vtf").c_str(), "wb");
         std::fwrite(file.data(), 1, file.size(), fp); std::fclose(fp);
         for (uint32_t f = 0; f < c.frames; ++f) {

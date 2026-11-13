@@ -1,12 +1,12 @@
-VTF Export {version} - Valve Texture Format plug-in for Adobe Photoshop (x64)
-https://github.com/haos9cr/VTFExport
+VTFBridge {version} - Valve Texture Format plug-in for Adobe Photoshop (x64)
+https://github.com/haos9cr/VTFBridge
 
 INSTALL
 1. Close Photoshop.
-2. Copy VTFExport.8bi into Photoshop's plug-in folder, e.g.
+2. Copy VTFBridge.8bi into Photoshop's plug-in folder, e.g.
    C:\Program Files\Adobe\Adobe Photoshop 2026\Plug-ins\
-   (optional: copy the VTFExport_lang folder next to it - only needed
-   for your own translations, see VTFExport_lang\template.lang.txt).
+   (optional: copy the VTFBridge_lang folder next to it - only needed
+   for your own translations, see VTFBridge_lang\template.lang.txt).
 3. Start Photoshop.
 
 USE
@@ -19,10 +19,10 @@ Remove the old 32-bit VTF.8bi if you have it - 64-bit Photoshop cannot load it.
 
 УСТАНОВКА
 1. Закройте Photoshop.
-2. Скопируйте VTFExport.8bi в папку плагинов Photoshop, например
+2. Скопируйте VTFBridge.8bi в папку плагинов Photoshop, например
    C:\Program Files\Adobe\Adobe Photoshop 2026\Plug-ins\
-   (папку VTFExport_lang можно положить рядом - она нужна только для
-   своих переводов, см. VTFExport_lang\template.lang.txt).
+   (папку VTFBridge_lang можно положить рядом - она нужна только для
+   своих переводов, см. VTFBridge_lang\template.lang.txt).
 3. Запустите Photoshop.
 
 ИСПОЛЬЗОВАНИЕ

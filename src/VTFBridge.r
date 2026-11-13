@@ -1,8 +1,8 @@
-// VTFExport.r - PiPL resource (open + save). Preprocessed with cl /EP and converted by
-// the SDK's Cnvtpipl.exe into VTFExport.pipl (included by VTFExport.rc).
+// VTFBridge.r - PiPL resource (open + save). Preprocessed with cl /EP and converted by
+// the SDK's Cnvtpipl.exe into VTFBridge.pipl (included by VTFBridge.rc).
 
-#define plugInName          "VTF Export"
-#define vendorName          "VTF Export"
+#define plugInName          "VTFBridge"
+#define vendorName          "VTFBridge"
 #define ResourceID          16000
 
 #include "PIDefines.h"

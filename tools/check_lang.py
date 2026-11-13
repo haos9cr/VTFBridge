@@ -6,6 +6,7 @@ Errors (exit code 1):
   - missing language.name / language.code, or a code used by two files
   - unknown keys (typos, or keys removed from the plug-in)
   - placeholders ({w}, {error}, ...) that differ from the English text
+  - a double-escaped line break (\\\\n shows up as \\n in the dialog)
 Warnings: duplicated keys. Info: untranslated keys (they fall back to English).
 """
 import re
@@ -76,6 +77,8 @@ def main():
                 problems.append(f"unknown key '{key}'")
             elif placeholders(value) != placeholders(en[key]):
                 problems.append(f"'{key}': placeholders {placeholders(value)} != English {placeholders(en[key])}")
+            if "\\\\n" in value:
+                problems.append(f"'{key}': '\\\\n' is shown as text, use '\\n' for a line break")
         for line, key in dups:
             print(f"WARN  {f.name}:{line}: '{key}' defined twice (the last one wins)")
         missing = [k for k in en if k not in entries and not k.startswith("flag.")]
