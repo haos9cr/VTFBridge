@@ -298,6 +298,7 @@ Options ReadInfo::AsOptions(const Options& base) const {
     o.mipmaps = mipCount > 1;
     o.thumbnail = hasThumbnail;
     o.flags = flags & USER_FLAGS_MASK;
+    if ((flags & FLAG_CLAMPS) && (flags & FLAG_CLAMPT)) o.tiling = false;  // clamped both ways: not a tiling texture
     o.animate = frames > 1;
     return o;
 }

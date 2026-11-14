@@ -24,6 +24,7 @@
 #define IDC_VMT                1029
 #define IDC_SHADER             1030
 #define IDC_FILESIZE           1031
+#define IDC_TILING             1032
 
 // Static texts / group boxes whose captions are localised at runtime.
 #define IDC_LBL_LANG           1040

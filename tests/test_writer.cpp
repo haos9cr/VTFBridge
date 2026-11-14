@@ -1,6 +1,7 @@
 // Generates VTF files in every supported format / version for validation.
 // Build: g++ -std=c++17 -O2 -I../src test_writer.cpp ../src/VtfWriter.cpp -o test_writer
 #include "VtfWriter.h"
+#include "VtfReader.h"
 
 #include <cstdio>
 #include <string>
@@ -99,6 +100,16 @@ int main(int argc, char** argv) {
         else CheckSize(out, o, "tiny"), Save(outDir + "/tiny" + std::to_string(s) + ".vtf", out);
     }
 
+    // Re-saving: "tiling" is switched off for files clamped in both directions,
+    // otherwise the last used setting stays.
+    for (uint32_t clamp : {0u, uint32_t(vtf::FLAG_CLAMPS), uint32_t(vtf::FLAG_CLAMPS | vtf::FLAG_CLAMPT)}) {
+        vtf::Options o; o.colorFormat = o.alphaFormat = vtf::FMT_DXT1; o.flags = clamp;
+        std::vector<uint8_t> file, px; std::string err; vtf::ReadInfo info;
+        if (!vtf::Write(opaque.data(), W, H, o, file, err) || !vtf::Read(file.data(), file.size(), px, info, err)) { ++failures; continue; }
+        vtf::Options base; base.tiling = true;
+        const bool expect = clamp != (vtf::FLAG_CLAMPS | vtf::FLAG_CLAMPT);
+        if (info.AsOptions(base).tiling != expect) { std::printf("FAIL AsOptions tiling, flags %x\n", clamp); ++failures; }
+    }
     failures += g_sizeErrors;
     std::printf("done, failures=%d\n", failures);
     return failures ? 1 : 0;

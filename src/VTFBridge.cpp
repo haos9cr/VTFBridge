@@ -129,7 +129,9 @@ struct RevertBlob {
     int32_t  resizeMethod, resizeFilter, mipFilter;
     uint32_t maxWidth, maxHeight;
     uint8_t  mipmaps, gammaFilter, thumbnail, resize;
-    uint8_t  animate, frameOrder, reserved[2];
+    uint8_t  animate, frameOrder;
+    uint8_t  tiling;     // 0 = not stored (older blob), 1 = off, 2 = on
+    uint8_t  reserved;
 };
 constexpr uint32_t kRevertMagic = 0x58465456;  // "VTFX"
 constexpr uint32_t kRevertVersion = 3;
@@ -160,6 +162,8 @@ bool LoadRevert(FormatRecordPtr fr, vtf::Options& opt) {
     opt.thumbnail = b.thumbnail != 0;
     opt.animate = b.animate != 0;
     opt.frameOrder = b.frameOrder;
+    if (b.tiling) opt.tiling = b.tiling == 2;
+    else if ((opt.flags & vtf::FLAG_CLAMPS) && (opt.flags & vtf::FLAG_CLAMPT)) opt.tiling = false;
     opt = SanitizeOptions(opt);
     return true;
 }
@@ -191,6 +195,7 @@ void StoreRevert(FormatRecordPtr fr, const vtf::Options& opt) {
     b.thumbnail = opt.thumbnail;
     b.animate = opt.animate;
     b.frameOrder = uint8_t(opt.frameOrder);
+    b.tiling = opt.tiling ? 2 : 1;
     Ptr p = hp->lockProc(fr->revertInfo, false);
     if (!p) return;
     std::memcpy(p, &b, sizeof(b));

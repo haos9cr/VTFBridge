@@ -81,8 +81,12 @@ Gaussian and Cubic are the softest; Sinc, Catmull-Rom and the windowed sincs are
 ring slightly on high-contrast edges. *Gamma-correct filtering* keeps the brightness of fine light
 or dark details in the mips; leave it off for normal maps, masks and other non-colour data.
 
-Edges: unless **Clamp S / Clamp T** is set, the texture is treated as tiling while filtering, so
-mipmaps of tiling textures stay seamless.
+Edges: by default the edges are clamped while resizing and filtering mipmaps, like in VTFEdit —
+nothing bleeds in from the opposite edge (right for decals, sprites, UI). For textures that repeat
+(walls, floors, terrain) check **Tiling texture**: the left edge is then blended with the right one
+and the top with the bottom, so the mipmaps stay seamless. *Clamp S* / *Clamp T* turn this off for
+their direction. The setting is remembered; it is switched off when re-saving a VTF that has both
+*Clamp S* and *Clamp T*.
 
 ### Animation
 

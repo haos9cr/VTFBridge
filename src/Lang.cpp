@@ -45,6 +45,7 @@ const Builtin kStrings[] = {
     {"dlg.mipmaps",       L"Generate mipmaps"},
     {"dlg.mip_filter",    L"Mipmap filter:"},
     {"dlg.gamma",         L"Gamma-correct filtering (resize and mipmaps)"},
+    {"dlg.tiling",        L"Tiling texture (blend opposite edges when filtering)"},
     {"dlg.thumb",         L"Create thumbnail"},
     {"dlg.group_anim",    L"Animation"},
     {"dlg.animate",       L"Layers → animation frames (visible layers: {n})"},
@@ -90,10 +91,8 @@ const Builtin kStrings[] = {
     {"tip.point_sample",      L"No smoothing between pixels: a crisp, pixelated look (pixel art, some UI)."},
     {"tip.trilinear",         L"Trilinear filtering: smooth blending between mipmap levels."},
     {"tip.anisotropic",       L"Anisotropic filtering: keeps the texture sharp when seen at a steep angle."},
-    {"tip.clamp_s",           L"Do not repeat the texture horizontally: edge pixels are stretched instead.\n"
-                              L"Also stops mipmaps and resizing from wrapping around the left/right edges."},
-    {"tip.clamp_t",           L"Do not repeat the texture vertically: edge pixels are stretched instead.\n"
-                              L"Also stops mipmaps and resizing from wrapping around the top/bottom edges."},
+    {"tip.clamp_s",           L"Do not repeat the texture horizontally: edge pixels are stretched instead."},
+    {"tip.clamp_t",           L"Do not repeat the texture vertically: edge pixels are stretched instead."},
     {"tip.clamp_u",           L"Do not repeat along the depth (volume textures only)."},
     {"tip.no_mipmap",         L"The engine uses only the full-size image. Typical for UI and HUD textures."},
     {"tip.no_lod",            L"Always load the full resolution, ignoring the texture quality setting.\n"
@@ -108,6 +107,11 @@ const Builtin kStrings[] = {
     {"tip.single_copy",       L"The engine keeps only one copy of this texture in memory."},
     {"tip.vertex_texture",    L"Texture read by vertex shaders. Rarely needed."},
     {"tip.border",            L"Clamp to a border colour instead of the edge pixels. Rarely needed."},
+    {"tip.tiling",            L"For textures that repeat (walls, floors, terrain): resizing and mipmaps blend\n"
+                              L"the left edge with the right one and the top with the bottom, so no seam appears.\n"
+                              L"Leave it off for decals, sprites, UI and anything with a transparent border:\n"
+                              L"otherwise pixels from one edge bleed into the opposite edge of the mipmaps.\n"
+                              L"Clamp S / Clamp T turn it off for their direction."},
     {"tip.vmt",               L"Also writes a material next to the .vtf. $basetexture is the path after the\n"
                               L"\"materials\" folder. Alpha adds $alphatest (cut-out) or $translucent (soft),\n"
                               L"several frames add the AnimatedTexture proxy.\n"

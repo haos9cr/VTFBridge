@@ -243,6 +243,7 @@ void UpdateEnabled(HWND dlg, const DialogState* st) {
     EnableWindow(GetDlgItem(dlg, IDC_MIPFILTER), mips);
     EnableWindow(GetDlgItem(dlg, IDC_LBL_MIPFILTER), mips);
     EnableWindow(GetDlgItem(dlg, IDC_GAMMA), mips || resize);
+    EnableWindow(GetDlgItem(dlg, IDC_TILING), mips || resize);
 
     // A normal map / SSBump is not a material of its own: no .vmt for it.
     bool bump = false;
@@ -284,7 +285,7 @@ void UpdateTips(DialogState* st, HWND dlg) {
             ti.uId = reinterpret_cast<UINT_PTR>(GetDlgItem(dlg, IDC_FLAG_FIRST + i));
             SendMessageW(st->tooltip, TTM_DELTOOLW, 0, reinterpret_cast<LPARAM>(&ti));
         }
-        for (int id : {IDC_VMT, IDC_SHADER}) {
+        for (int id : {IDC_VMT, IDC_SHADER, IDC_TILING}) {
             TOOLINFOW ti = {};
             ti.cbSize = sizeof(ti);
             ti.hwnd = dlg;
@@ -293,9 +294,10 @@ void UpdateTips(DialogState* st, HWND dlg) {
         }
     }
     st->tipTexts.clear();
-    st->tipTexts.reserve(kFlagCount + 2);  // no reallocation: tools point into the strings
+    st->tipTexts.reserve(kFlagCount + 3);  // no reallocation: tools point into the strings
     for (int i = 0; i < kFlagCount; ++i) AddTip(st, dlg, IDC_FLAG_FIRST + i, lang::T(FlagTipKey(kFlags[i].key).c_str()));
     AddTip(st, dlg, IDC_VMT, lang::T("tip.vmt"));
+    AddTip(st, dlg, IDC_TILING, lang::T("tip.tiling"));
     AddTip(st, dlg, IDC_SHADER, lang::T("tip.shader"));
 }
 
@@ -315,6 +317,7 @@ void ApplyTexts(HWND dlg, DialogState* st) {
     SetDlgItemTextW(dlg, IDC_MIPMAPS, lang::T("dlg.mipmaps").c_str());
     SetDlgItemTextW(dlg, IDC_LBL_MIPFILTER, lang::T("dlg.mip_filter").c_str());
     SetDlgItemTextW(dlg, IDC_GAMMA, lang::T("dlg.gamma").c_str());
+    SetDlgItemTextW(dlg, IDC_TILING, lang::T("dlg.tiling").c_str());
     SetDlgItemTextW(dlg, IDC_THUMB, lang::T("dlg.thumb").c_str());
     SetDlgItemTextW(dlg, IDC_GRP_FLAGS, lang::T("dlg.group_flags").c_str());
     SetDlgItemTextW(dlg, IDC_GRP_ANIM, lang::T("dlg.group_anim").c_str());
@@ -387,6 +390,7 @@ void Fill(HWND dlg, const DialogState* st, const vtf::Options& opt) {
     CheckDlgButton(dlg, IDC_MIPMAPS, opt.mipmaps ? BST_CHECKED : BST_UNCHECKED);
     SendDlgItemMessageW(dlg, IDC_MIPFILTER, CB_SETCURSEL, opt.mipFilter, 0);
     CheckDlgButton(dlg, IDC_GAMMA, opt.gammaFilter ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(dlg, IDC_TILING, opt.tiling ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(dlg, IDC_THUMB, opt.thumbnail ? BST_CHECKED : BST_UNCHECKED);
     for (int i = 0; i < kFlagCount; ++i)
         CheckDlgButton(dlg, IDC_FLAG_FIRST + i, (opt.flags & kFlags[i].flag) ? BST_CHECKED : BST_UNCHECKED);
@@ -418,6 +422,7 @@ void Collect(HWND dlg, vtf::Options& opt) {
     i = ComboSel(dlg, IDC_MIPFILTER);
     if (i >= 0 && i < vtf::FILTER_COUNT) opt.mipFilter = i;
     opt.gammaFilter = IsDlgButtonChecked(dlg, IDC_GAMMA) == BST_CHECKED;
+    opt.tiling = IsDlgButtonChecked(dlg, IDC_TILING) == BST_CHECKED;
     opt.thumbnail = IsDlgButtonChecked(dlg, IDC_THUMB) == BST_CHECKED;
     opt.flags = 0;
     for (int k = 0; k < kFlagCount; ++k)
@@ -546,6 +551,7 @@ vtf::Options LoadOptions() {
     o.mipmaps = ReadDword(key, L"Mipmaps", o.mipmaps) != 0;
     o.mipFilter = int(ReadDword(key, L"MipFilter", DWORD(o.mipFilter)));
     o.gammaFilter = ReadDword(key, L"GammaMipmaps", o.gammaFilter) != 0;
+    o.tiling = ReadDword(key, L"Tiling", o.tiling) != 0;
     o.thumbnail = ReadDword(key, L"Thumbnail", o.thumbnail) != 0;
     o.flags = ReadDword(key, L"Flags", o.flags) & vtf::USER_FLAGS_MASK;
     o.frameOrder = int(ReadDword(key, L"FrameOrder", DWORD(o.frameOrder)));
@@ -594,6 +600,7 @@ void SaveOptions(const vtf::Options& o) {
     WriteDword(key, L"Mipmaps", o.mipmaps);
     WriteDword(key, L"MipFilter", DWORD(o.mipFilter));
     WriteDword(key, L"GammaMipmaps", o.gammaFilter);
+    WriteDword(key, L"Tiling", o.tiling);
     WriteDword(key, L"Thumbnail", o.thumbnail);
     WriteDword(key, L"Flags", o.flags);
     WriteDword(key, L"FrameOrder", DWORD(o.frameOrder));

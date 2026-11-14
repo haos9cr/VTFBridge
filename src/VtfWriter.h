@@ -94,6 +94,8 @@ struct Options {
     // Plug-in level (not used by the encoder itself).
     bool     animate        = false;      // save visible layers as animation frames
     int      frameOrder     = 0;          // FRAME_ORDER_*
+    bool     tiling         = false;      // wrap across opposite edges when filtering (resize, mipmaps);
+                                          // Clamp S / Clamp T still force clamping on their axis
     bool     vmt            = false;      // also write a .vmt next to the .vtf (if none exists)
     int      vmtShader      = 0;          // vmt::Shader
 };

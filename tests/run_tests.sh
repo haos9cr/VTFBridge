@@ -57,6 +57,12 @@ mkdir -p normal
 run ./normal_test normal
 run $PY "$ROOT/tests/validate_normal.py" normal
 
+step "Mipmap edges: no wrap-around unless the texture is tiling"
+$CXX $CXXFLAGS "$ROOT/tests/edge_test.cpp" $CORE -o edge_test
+mkdir -p edges
+run ./edge_test edges
+run $PY "$ROOT/tests/validate_edges.py" edges
+
 step "VMT builder"
 $CXX $CXXFLAGS "$ROOT/tests/vmt_test.cpp" "$ROOT/src/Vmt.cpp" -o vmt_test
 run ./vmt_test

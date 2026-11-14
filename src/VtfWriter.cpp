@@ -231,8 +231,10 @@ void RenormalizeNormals(FloatImage& img) {
 std::vector<Image> BuildChain(const uint8_t* rgba, uint32_t width, uint32_t height, const Options& opt) {
     // Repeat across the edges unless the texture is clamped in that direction:
     // mips/resizes of tiling textures then stay seamless.
-    const bool wrapX = !(opt.flags & FLAG_CLAMPS);
-    const bool wrapY = !(opt.flags & FLAG_CLAMPT);
+    // Edges: clamp unless the user marked the texture as tiling (decals and
+    // sprites must not get pixels from the opposite edge in their mipmaps).
+    const bool wrapX = opt.tiling && !(opt.flags & FLAG_CLAMPS);
+    const bool wrapY = opt.tiling && !(opt.flags & FLAG_CLAMPT);
     // Normal maps (not SSBump: its three vectors are not unit length) hold
     // directions, not colours: no gamma, renormalised after every filter step.
     const bool normal = (opt.flags & FLAG_NORMAL) && !(opt.flags & FLAG_SSBUMP);

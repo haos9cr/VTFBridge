@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.1
+
+- **Fixed: pixels from the opposite edge in mipmaps.** Mipmaps and resizing treated every texture
+  as tiling unless *Clamp S* / *Clamp T* was set, so e.g. an opaque stripe at the left edge of a
+  decal appeared at the right edge of its mipmaps. Edges are now clamped by default (like VTFEdit);
+  the new option **Tiling texture** in the *Mipmaps* box turns wrap-around back on for textures
+  that repeat. It is remembered, and switched off when re-saving a VTF clamped in both directions.
+
 ## 1.1.0
 
 - **Normal maps:** with the *Normal Map* flag the mipmaps are renormalized, so the bumps no longer
