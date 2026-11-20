@@ -39,6 +39,71 @@ dlg.group_mips = Mipmaps and thumbnail
 dlg.mipmaps = Generate mipmaps
 dlg.mip_filter = Mipmap filter:
 dlg.gamma = Gamma-correct filtering (resize and mipmaps)
+dlg.dxt_quality = Quality:
+
+dxtq.fast = Fast (stb_dxt)
+dxtq.high = High (icbc)
+dxtq.best = Best (icbc)
+dxtq.max = VTFBridge: Accurate
+dxtq.perceptual = VTFBridge: Perceptual
+
+dlg.alpha = Alpha:
+
+alpha.auto_channel = Auto: channel “{name}”
+alpha.auto_transparency = Auto: transparency
+alpha.auto_none = Auto: none
+alpha.transparency = Layer transparency (like PNG)
+alpha.none = None (opaque)
+alpha.channel = Channel “{name}”
+
+dlg.sharpen = Mipmap sharpness:
+dlg.sharpen_alpha = Alpha too
+dlg.preview = Preview...
+
+preview.title = Texture preview
+preview.level = Level:
+preview.level_item = Mip {n}: {w} x {h}
+preview.auto = Auto
+preview.view = View:
+preview.view_rgb = Colour (RGB)
+preview.view_alpha = Alpha
+preview.view_checker = Colour on checkerboard
+preview.zoom = Zoom:
+preview.fit = Fit
+preview.tile = Tile
+preview.mode = Show:
+preview.mode_result = Result
+preview.mode_ref = Reference
+preview.mode_split = Split: reference | result
+preview.mode_diff = Difference (x{gain})
+preview.mode_chain = Mip chain
+preview.ref = Reference:
+preview.ref_uncompressed = Without compression
+preview.ref_file_mips = File: {name} (mips from the file)
+preview.ref_file_box = File: {name} (mips: Box)
+preview.ref_browse = Own image...
+preview.file_filter = Images
+preview.load_error = Could not open the image "{name}".
+preview.resize_filter = Resize filter:
+preview.sharpen = Sharpness:
+preview.apply = Apply
+preview.info = Mip {n}: {w} x {h}, {format}
+preview.accuracy = accuracy {psnr} dB (PSNR) - {grade}
+preview.accuracy_file = accuracy against "{name}": {psnr} dB (PSNR) - {grade}
+preview.same_as_file = identical to "{name}"
+preview.grade_excellent = excellent
+preview.grade_good = good
+preview.grade_visible = visible loss
+preview.grade_heavy = heavy loss
+preview.lossless = no compression loss
+preview.showing_ref = showing the reference
+preview.hint = Space: show the reference   Wheel: zoom   Drag: move
+preview.computing = Computing...
+preview.frame = Frame:
+preview.frame_item = {n} of {count}
+preview.ref_frames = ({n} frames)
+preview.unavailable = Photoshop did not provide the image for the preview.
+
 dlg.tiling = Tiling texture (blend opposite edges when filtering)
 dlg.thumb = Create thumbnail
 dlg.group_anim = Animation
@@ -102,10 +167,16 @@ tip.single_copy = The engine keeps only one copy of this texture in memory.
 tip.vertex_texture = Texture read by vertex shaders. Rarely needed.
 tip.border = Clamp to a border colour instead of the edge pixels. Rarely needed.
 tip.tiling = For textures that repeat (walls, floors, terrain): resizing and mipmaps blend\nthe left edge with the right one and the top with the bottom, so no seam appears.\nLeave it off for decals, sprites, UI and anything with a transparent border:\notherwise pixels from one edge bleed into the opposite edge of the mipmaps.\nClamp S / Clamp T turn it off for their direction.
+tip.dxt_quality = How the DXT colours (and DXT5 alpha) of every 4x4 block are chosen.\nFast (stb_dxt): as in VTF Export 1.0 / VTFBridge 1.1.\nHigh / Best (icbc by Ignacio Castano): third-party encoder; on very smooth\ngradients it can leave visible steps. Best also gives a better DXT5 alpha.\nVTFBridge: Accurate (default): stb_dxt + VTFBridge's own refinement -\nthe smoothest gradients, equally accurate on every graphics card, better DXT5 alpha.\nVTFBridge: Perceptual: like Accurate, but errors count the way the eye sees them\n(green > red > blue); not for masks or data. Normal maps always use Accurate.
+tip.alpha = Where the alpha of the texture comes from:\nLayer transparency - the checkerboard areas, like in a PNG.\nChannel - an alpha channel from the Channels panel (a mask, e.g. for\n$basealphaenvmapmask or $selfillum), while the image itself stays opaque.\nNone - the texture is saved without alpha.\nAuto uses the first alpha channel if there is one, otherwise the transparency.\nFor animation frames, Auto and transparency use each layer's own transparency.
+tip.sharpen_alpha = Sharpen the alpha channel of the mipmaps as well, so cut-outs ($alphatest),\nfences, foliage and thin details do not fade out in the distance.\nLeave it off for soft transparency gradients.
+tip.sharpen = Sharpens every mipmap below the full-size image, so details stay readable\nin the distance (like the sharpening of the old NVIDIA tools in VTFEdit).\n0% = off. Too much gives bright halos on edges; check it in the preview.
+tip.preview = Shows the texture exactly as it will be saved: every mipmap compressed and decoded back,\nwith the accuracy against a reference (the uncompressed mips or your own image).\nViews: result, reference, split, difference, the whole mip chain; tiling, zoom, Auto level.\nFilters, sharpness and DXT quality can be changed right in the preview.
 tip.vmt = Also writes a material next to the .vtf. $basetexture is the path after the\n"materials" folder. Alpha adds $alphatest (cut-out) or $translucent (soft),\nseveral frames add the AnimatedTexture proxy.\nAn existing .vmt is never overwritten. Not available for normal maps.
 tip.shader = VertexLitGeneric: models\nLightmappedGeneric: world brushes\nUnlitGeneric: sprites, UI, no lighting
 
 layer.frame = Frame {n}
+layer.frame_alpha = Frame {n} Alpha
 
 msg.title = VTFBridge
 msg.mode = VTF: only RGB and Grayscale modes are supported.
@@ -119,9 +190,42 @@ msg.cubemap = - it is a cubemap ({faces} faces): only the first face is opened;
 msg.volume = - it is a volume texture ({depth} slices): only the first slice is opened;
 msg.format_note = Format: {format}
 msg.layer_error = Cannot read layer "{name}" of the document.
+msg.alpha_error = Cannot read the alpha channel of the document.
 msg.vmt_error = The texture is saved, but the material could not be written:\n{path}
 msg.vmt_no_path = The texture is saved, but its folder is unknown, so no .vmt was created.
 
 about.title = About VTFBridge
+about.settings = Settings...
+about.open_settings = Open the settings?
+
+settings.title = VTFBridge settings
+settings.open_group = Opening animated VTF files
+settings.anim_alpha = Frame alpha:
+
+animalpha.layers = Hidden layer "Frame N Alpha"
+animalpha.transparency = Layer transparency
+animalpha.ask = Ask every time
+
+settings.save_group = Saving
+settings.save_hint = The save dialog remembers the last values; here they can be set in advance.
+settings.shader = Shader:
+settings.reset = Reset all
+settings.ok = OK
+
+alpha.auto = Auto
+
+ask.anim_alpha = This animation has alpha. How should it open?
+ask.layers = Hidden alpha layers\nOpaque "Frame N" + hidden "Frame N Alpha": the colour under transparent parts stays editable
+ask.transparency = Layer transparency\nOrdinary layers with transparency, like a PNG
+ask.remember = Remember my choice
+ask.remember_hint = It can be changed later: Help > About Plug-ins > Valve Texture Format > Settings.
+
+tool.to_masks = VTFBridge: alpha layers to masks
+tool.no_document = No document is open.
+tool.to_masks_none = No "Frame N" / "Frame N Alpha" layer pairs were found.
+tool.to_masks_done = Done: the alpha of {n} frame(s) is now in their layer masks.
+tool.errors = Could not process:
+tool.script_error = The command could not be run (error {code}).
+
 about.updates = Check for updates
-about.text = VTFBridge {version} for Adobe Photoshop (x64)\n\nOpens and saves Valve Texture Format (.vtf) files.\nAnimated textures open as layers; visible layers can be saved as frames.\nSaving: DXT1/3/5, BGR(A)8888, RGB(A)8888, 565/4444/5551, I8, IA88, A8,\npower-of-two resize, mipmaps with 15 filters, thumbnail, flags, versions 7.1 - 7.5,\noptional .vmt material.\n\nLanguages folder: {folder}\n\nDXT compression: stb_dxt (public domain).
+about.text = VTFBridge {version} for Adobe Photoshop (x64)\n\nOpens and saves Valve Texture Format (.vtf) files.\nAnimated textures open as layers; visible layers can be saved as frames.\nSaving: DXT1/3/5, BGR(A)8888, RGB(A)8888, 565/4444/5551, I8, IA88, A8,\npower-of-two resize, mipmaps with 15 filters, thumbnail, flags, versions 7.1 - 7.5,\noptional .vmt material.\n\nLanguages folder: {folder}\n\nDXT compression: stb_dxt (public domain), icbc by Ignacio Castano (MIT).

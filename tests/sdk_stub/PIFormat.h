@@ -16,7 +16,9 @@ typedef struct { VRect sourceRect; VRect destinationRect; } PSScaling;
 typedef struct { void* data; int32 rowBits; int32 colBits; int32 bitOffset; int32 depth; } PixelMemoryDesc;
 typedef OSErr (*ReadPixelsProc)(ChannelReadPort, const PSScaling*, const VRect*, const PixelMemoryDesc*, VRect*);
 typedef struct { int32 channelPortsVersion; int32 numChannelPortProcs; ReadPixelsProc readPixelsProc; void* w; void* r; } ChannelPortProcs;
-typedef struct ReadChannelDesc { int32 minVersion, maxVersion; struct ReadChannelDesc* next; ChannelReadPort port; VRect bounds; int32 depth; } ReadChannelDesc;
+typedef struct ReadChannelDesc { int32 minVersion, maxVersion; struct ReadChannelDesc* next; ChannelReadPort port; VRect bounds; int32 depth;
+  VPoint tileSize, tileOrigin; Boolean target, shown; int16 channelType; void* contextInfo; const char* name;
+  void* writePort; unsigned32 alphaID; const uint16* unicodeName; } ReadChannelDesc;
 typedef struct ReadLayerDesc { int32 minVersion, maxVersion; struct ReadLayerDesc* next; ReadChannelDesc *compositeChannelsList, *transparency, *layerMask;
   unsigned32 sheetID; const char* name; Boolean isPixelBased; const uint16* unicodeName; Boolean isVisible, isAdjustor, isContentGenerator, isRendered;
   unsigned8 opacity, fillOpacity; PIType blendMode; ReadChannelDesc *vectorMask, *smartFilterMask; } ReadLayerDesc;
@@ -33,6 +35,7 @@ typedef struct {
   HandleProcs* handleProcs; Handle revertInfo; uint32 layerData; uint16* layerName; int16 transparencyPlane, transparencyMatting; Handle imageRsrcData; int32 imageRsrcSize;
   Boolean HostSupports32BitCoordinates, PluginUsing32BitCoordinates; VPoint imageSize32; VRect theRect32;
   uint16* finalSpec;  /* UTF-16 path of the file being saved (real SDK: since Photoshop CS4) */
+  Boolean isVisible;  /* read: set by the plug-in for the layer being read (real SDK: since CS5) */
 } FormatRecord, *FormatRecordPtr;
 enum { noErr = 0, userCanceledErr = -128, writErr = -20, readErr = -19, dskFulErr = -34, memFullErr = -108, formatBadParameters = -30500, formatCannotRead = -30501 };
 enum { formatSelectorAbout, formatSelectorReadPrepare, formatSelectorReadStart, formatSelectorReadContinue, formatSelectorReadFinish,

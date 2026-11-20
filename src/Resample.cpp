@@ -241,4 +241,31 @@ FloatImage Resample(const FloatImage& src, uint32_t dw, uint32_t dh, Filter filt
     return out;
 }
 
+void Sharpen(FloatImage& img, float amount, bool wrapX, bool wrapY, bool alpha) {
+    const int channels = alpha ? 4 : 3;
+    if (amount <= 0.0f || img.w < 2 || img.h < 2) return;
+    const uint32_t w = img.w, h = img.h;
+    auto ix = [&](int x) { return uint32_t(wrapX ? (x + int(w)) % int(w) : std::min(std::max(x, 0), int(w) - 1)); };
+    auto iy = [&](int y) { return uint32_t(wrapY ? (y + int(h)) % int(h) : std::min(std::max(y, 0), int(h) - 1)); };
+    // Separable [1 2 1] / 4 blur.
+    std::vector<float> tmp(img.px.size()), blur(img.px.size());
+    for (uint32_t y = 0; y < h; ++y)
+        for (uint32_t x = 0; x < w; ++x)
+            for (int c = 0; c < channels; ++c)
+                tmp[(size_t(y) * w + x) * 4 + c] = 0.25f * img.px[(size_t(y) * w + ix(int(x) - 1)) * 4 + c] +
+                                                   0.5f * img.px[(size_t(y) * w + x) * 4 + c] +
+                                                   0.25f * img.px[(size_t(y) * w + ix(int(x) + 1)) * 4 + c];
+    for (uint32_t y = 0; y < h; ++y)
+        for (uint32_t x = 0; x < w; ++x)
+            for (int c = 0; c < channels; ++c)
+                blur[(size_t(y) * w + x) * 4 + c] = 0.25f * tmp[(size_t(iy(int(y) - 1)) * w + x) * 4 + c] +
+                                                    0.5f * tmp[(size_t(y) * w + x) * 4 + c] +
+                                                    0.25f * tmp[(size_t(iy(int(y) + 1)) * w + x) * 4 + c];
+    for (size_t i = 0; i < img.px.size(); i += 4)
+        for (int c = 0; c < channels; ++c) {
+            const float v = img.px[i + c] + amount * (img.px[i + c] - blur[i + c]);
+            img.px[i + c] = std::min(1.0f, std::max(0.0f, v));
+        }
+}
+
 } // namespace vtf

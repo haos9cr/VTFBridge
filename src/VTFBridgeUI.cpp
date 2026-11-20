@@ -19,6 +19,8 @@
 #include "Vmt.h"
 #include "resource.h"
 
+void FitMainLabels(HWND dlg);
+
 namespace {
 
 const wchar_t* kRegKey = L"Software\\VTFBridge";
@@ -104,6 +106,8 @@ struct DialogState {
     vtf::Options* opt;
     int width, height;
     int visibleLayers;        // frames available for "layers -> animation"
+    const AlphaInfo* alpha;   // alpha channels of the document
+    const FetchPixelsFn* fetch;  // document pixels for the preview
     std::wstring langBefore;  // restored on Cancel
     HWND tooltip = nullptr;
     std::vector<std::wstring> tipTexts;  // must outlive the tooltip tools
@@ -113,6 +117,20 @@ struct DialogState {
 std::string FlagTipKey(const char* flagKey) { return std::string("tip.") + (flagKey + 5); }
 
 int ComboSel(HWND dlg, int id) { return int(SendDlgItemMessageW(dlg, id, CB_GETCURSEL, 0, 0)); }
+
+// Alpha list: 0 Auto, 1 Transparency, 2 None, 3 + n = alpha channel n.
+int AlphaSourceToIndex(int source, const AlphaInfo& a) {
+    if (source >= vtf::ALPHA_SOURCE_CHANNEL_FIRST) {
+        const int n = source - vtf::ALPHA_SOURCE_CHANNEL_FIRST;
+        return n < int(a.channels.size()) ? 3 + n : 0;
+    }
+    return source >= 0 && source <= 2 ? source : 0;
+}
+int AlphaIndexToSource(int index) {
+    return index >= 3 ? vtf::ALPHA_SOURCE_CHANNEL_FIRST + (index - 3) : (index >= 0 ? index : 0);
+}
+const char* kDxtQualities[] = {"dxtq.fast", "dxtq.high", "dxtq.best", "dxtq.max", "dxtq.perceptual"};
+bool IsDxt(int32_t f) { return f == vtf::FMT_DXT1 || f == vtf::FMT_DXT3 || f == vtf::FMT_DXT5; }
 
 void FillCombo(HWND dlg, int id, const std::vector<std::wstring>& items) {
     HWND c = GetDlgItem(dlg, id);
@@ -241,9 +259,16 @@ void UpdateEnabled(HWND dlg, const DialogState* st) {
     for (int id : {IDC_METHOD, IDC_RFILTER, IDC_MAXW, IDC_MAXH, IDC_LBL_METHOD, IDC_LBL_RFILTER, IDC_LBL_MAXW, IDC_LBL_MAXH})
         EnableWindow(GetDlgItem(dlg, id), resize);
     EnableWindow(GetDlgItem(dlg, IDC_MIPFILTER), mips);
+    for (int id : {IDC_SHARPEN, IDC_SHARPEN_VAL, IDC_LBL_SHARPEN, IDC_SHARPEN_ALPHA}) EnableWindow(GetDlgItem(dlg, id), mips);
     EnableWindow(GetDlgItem(dlg, IDC_LBL_MIPFILTER), mips);
     EnableWindow(GetDlgItem(dlg, IDC_GAMMA), mips || resize);
     EnableWindow(GetDlgItem(dlg, IDC_TILING), mips || resize);
+
+    // DXT quality only matters for DXT formats.
+    const int fi = ComboSel(dlg, IDC_FORMAT);
+    const bool dxt = fi >= 0 && fi < kFormatCount && (IsDxt(kFormats[fi].color) || IsDxt(kFormats[fi].alpha));
+    EnableWindow(GetDlgItem(dlg, IDC_DXTQ), dxt);
+    EnableWindow(GetDlgItem(dlg, IDC_LBL_DXTQ), dxt);
 
     // A normal map / SSBump is not a material of its own: no .vmt for it.
     bool bump = false;
@@ -285,7 +310,7 @@ void UpdateTips(DialogState* st, HWND dlg) {
             ti.uId = reinterpret_cast<UINT_PTR>(GetDlgItem(dlg, IDC_FLAG_FIRST + i));
             SendMessageW(st->tooltip, TTM_DELTOOLW, 0, reinterpret_cast<LPARAM>(&ti));
         }
-        for (int id : {IDC_VMT, IDC_SHADER, IDC_TILING}) {
+        for (int id : {IDC_VMT, IDC_SHADER, IDC_TILING, IDC_DXTQ, IDC_ALPHA, IDC_SHARPEN, IDC_SHARPEN_ALPHA, IDC_PREVIEW}) {
             TOOLINFOW ti = {};
             ti.cbSize = sizeof(ti);
             ti.hwnd = dlg;
@@ -294,10 +319,15 @@ void UpdateTips(DialogState* st, HWND dlg) {
         }
     }
     st->tipTexts.clear();
-    st->tipTexts.reserve(kFlagCount + 3);  // no reallocation: tools point into the strings
+    st->tipTexts.reserve(kFlagCount + 8);  // no reallocation: tools point into the strings
     for (int i = 0; i < kFlagCount; ++i) AddTip(st, dlg, IDC_FLAG_FIRST + i, lang::T(FlagTipKey(kFlags[i].key).c_str()));
     AddTip(st, dlg, IDC_VMT, lang::T("tip.vmt"));
     AddTip(st, dlg, IDC_TILING, lang::T("tip.tiling"));
+    AddTip(st, dlg, IDC_DXTQ, lang::T("tip.dxt_quality"));
+    AddTip(st, dlg, IDC_ALPHA, lang::T("tip.alpha"));
+    AddTip(st, dlg, IDC_SHARPEN, lang::T("tip.sharpen"));
+    AddTip(st, dlg, IDC_SHARPEN_ALPHA, lang::T("tip.sharpen_alpha"));
+    AddTip(st, dlg, IDC_PREVIEW, lang::T("tip.preview"));
     AddTip(st, dlg, IDC_SHADER, lang::T("tip.shader"));
 }
 
@@ -307,6 +337,8 @@ void ApplyTexts(HWND dlg, DialogState* st) {
     SetDlgItemTextW(dlg, IDC_GRP_FORMAT, lang::T("dlg.group_format").c_str());
     SetDlgItemTextW(dlg, IDC_LBL_FORMAT, lang::T("dlg.format").c_str());
     SetDlgItemTextW(dlg, IDC_LBL_VERSION, lang::T("dlg.version").c_str());
+    SetDlgItemTextW(dlg, IDC_LBL_DXTQ, lang::T("dlg.dxt_quality").c_str());
+    SetDlgItemTextW(dlg, IDC_LBL_ALPHA, lang::T("dlg.alpha").c_str());
     SetDlgItemTextW(dlg, IDC_GRP_RESIZE, lang::T("dlg.group_resize").c_str());
     SetDlgItemTextW(dlg, IDC_RESIZE, lang::T("dlg.resize").c_str());
     SetDlgItemTextW(dlg, IDC_LBL_METHOD, lang::T("dlg.resize_method").c_str());
@@ -317,6 +349,9 @@ void ApplyTexts(HWND dlg, DialogState* st) {
     SetDlgItemTextW(dlg, IDC_MIPMAPS, lang::T("dlg.mipmaps").c_str());
     SetDlgItemTextW(dlg, IDC_LBL_MIPFILTER, lang::T("dlg.mip_filter").c_str());
     SetDlgItemTextW(dlg, IDC_GAMMA, lang::T("dlg.gamma").c_str());
+    SetDlgItemTextW(dlg, IDC_LBL_SHARPEN, lang::T("dlg.sharpen").c_str());
+    SetDlgItemTextW(dlg, IDC_SHARPEN_ALPHA, lang::T("dlg.sharpen_alpha").c_str());
+    SetDlgItemTextW(dlg, IDC_PREVIEW, lang::T("dlg.preview").c_str());
     SetDlgItemTextW(dlg, IDC_TILING, lang::T("dlg.tiling").c_str());
     SetDlgItemTextW(dlg, IDC_THUMB, lang::T("dlg.thumb").c_str());
     SetDlgItemTextW(dlg, IDC_GRP_FLAGS, lang::T("dlg.group_flags").c_str());
@@ -331,6 +366,7 @@ void ApplyTexts(HWND dlg, DialogState* st) {
     SetDlgItemTextW(dlg, IDC_GRP_VMT, lang::T("dlg.group_vmt").c_str());
     SetDlgItemTextW(dlg, IDC_VMT, lang::T("dlg.vmt").c_str());
     UpdateTips(st, dlg);
+    FitMainLabels(dlg);
 
     // Lists (selection is kept by FillCombo).
     std::vector<std::wstring> formats, filters, methods, sizes, orders, shaders;
@@ -346,6 +382,20 @@ void ApplyTexts(HWND dlg, DialogState* st) {
     for (const char* m : kResizeMethods) methods.push_back(lang::T(m));
     for (const char* o : kFrameOrders) orders.push_back(lang::T(o));
     for (uint32_t v : kMaxSizes) sizes.push_back(v ? std::to_wstring(v) : lang::T("dlg.no_limit"));
+    std::vector<std::wstring> qualities, alphas;
+    for (const char* q : kDxtQualities) qualities.push_back(lang::T(q));
+    const AlphaInfo& ai = *st->alpha;
+    if (ai.autoSource >= vtf::ALPHA_SOURCE_CHANNEL_FIRST && !ai.channels.empty())
+        alphas.push_back(lang::Tf("alpha.auto_channel", {{"name", ai.channels[0]}}));
+    else if (ai.autoSource == vtf::ALPHA_SOURCE_TRANSPARENCY)
+        alphas.push_back(lang::T("alpha.auto_transparency"));
+    else
+        alphas.push_back(lang::T("alpha.auto_none"));
+    alphas.push_back(lang::T("alpha.transparency"));
+    alphas.push_back(lang::T("alpha.none"));
+    for (const std::wstring& c : ai.channels) alphas.push_back(lang::Tf("alpha.channel", {{"name", c}}));
+    FillCombo(dlg, IDC_DXTQ, qualities);
+    FillCombo(dlg, IDC_ALPHA, alphas);
     FillCombo(dlg, IDC_FORMAT, formats);
     FillCombo(dlg, IDC_ORDER, orders);
     FillCombo(dlg, IDC_SHADER, shaders);
@@ -382,6 +432,8 @@ void Fill(HWND dlg, const DialogState* st, const vtf::Options& opt) {
     CheckDlgButton(dlg, IDC_ANIMATE, opt.animate ? BST_CHECKED : BST_UNCHECKED);
     SendDlgItemMessageW(dlg, IDC_ORDER, CB_SETCURSEL, opt.frameOrder, 0);
     SendDlgItemMessageW(dlg, IDC_VERSION, CB_SETCURSEL, opt.versionMinor - 1, 0);
+    SendDlgItemMessageW(dlg, IDC_DXTQ, CB_SETCURSEL, opt.dxtQuality, 0);
+    SendDlgItemMessageW(dlg, IDC_ALPHA, CB_SETCURSEL, AlphaSourceToIndex(opt.alphaSource, *st->alpha), 0);
     CheckDlgButton(dlg, IDC_RESIZE, opt.resize ? BST_CHECKED : BST_UNCHECKED);
     SendDlgItemMessageW(dlg, IDC_METHOD, CB_SETCURSEL, opt.resizeMethod, 0);
     SendDlgItemMessageW(dlg, IDC_RFILTER, CB_SETCURSEL, opt.resizeFilter, 0);
@@ -390,6 +442,9 @@ void Fill(HWND dlg, const DialogState* st, const vtf::Options& opt) {
     CheckDlgButton(dlg, IDC_MIPMAPS, opt.mipmaps ? BST_CHECKED : BST_UNCHECKED);
     SendDlgItemMessageW(dlg, IDC_MIPFILTER, CB_SETCURSEL, opt.mipFilter, 0);
     CheckDlgButton(dlg, IDC_GAMMA, opt.gammaFilter ? BST_CHECKED : BST_UNCHECKED);
+    SendDlgItemMessageW(dlg, IDC_SHARPEN, TBM_SETPOS, TRUE, opt.mipSharpen);
+    SetDlgItemTextW(dlg, IDC_SHARPEN_VAL, (std::to_wstring(opt.mipSharpen) + L"%").c_str());
+    CheckDlgButton(dlg, IDC_SHARPEN_ALPHA, opt.sharpenAlpha ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(dlg, IDC_TILING, opt.tiling ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(dlg, IDC_THUMB, opt.thumbnail ? BST_CHECKED : BST_UNCHECKED);
     for (int i = 0; i < kFlagCount; ++i)
@@ -407,6 +462,10 @@ void Collect(HWND dlg, vtf::Options& opt) {
     if (i >= 0 && i < 2) opt.frameOrder = i;
     i = ComboSel(dlg, IDC_VERSION);
     opt.versionMinor = (i >= 0 && i < 5) ? i + 1 : 2;
+    i = ComboSel(dlg, IDC_DXTQ);
+    if (i >= 0 && i < vtf::DXT_QUALITY_COUNT) opt.dxtQuality = i;
+    i = ComboSel(dlg, IDC_ALPHA);
+    if (i >= 0) opt.alphaSource = AlphaIndexToSource(i);
 
     opt.resize = IsDlgButtonChecked(dlg, IDC_RESIZE) == BST_CHECKED;
     i = ComboSel(dlg, IDC_METHOD);
@@ -422,6 +481,8 @@ void Collect(HWND dlg, vtf::Options& opt) {
     i = ComboSel(dlg, IDC_MIPFILTER);
     if (i >= 0 && i < vtf::FILTER_COUNT) opt.mipFilter = i;
     opt.gammaFilter = IsDlgButtonChecked(dlg, IDC_GAMMA) == BST_CHECKED;
+    opt.mipSharpen = int(SendDlgItemMessageW(dlg, IDC_SHARPEN, TBM_GETPOS, 0, 0));
+    opt.sharpenAlpha = IsDlgButtonChecked(dlg, IDC_SHARPEN_ALPHA) == BST_CHECKED;
     opt.tiling = IsDlgButtonChecked(dlg, IDC_TILING) == BST_CHECKED;
     opt.thumbnail = IsDlgButtonChecked(dlg, IDC_THUMB) == BST_CHECKED;
     opt.flags = 0;
@@ -434,6 +495,9 @@ void Collect(HWND dlg, vtf::Options& opt) {
 
 INT_PTR CALLBACK DialogProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
+    case WM_DESTROY:
+        ForgetLabelLayout(dlg);
+        break;
     case WM_INITDIALOG: {
         DialogState* st = reinterpret_cast<DialogState*>(lParam);
         SetWindowLongPtrW(dlg, DWLP_USER, lParam);
@@ -442,6 +506,8 @@ INT_PTR CALLBACK DialogProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam) {
         for (const wchar_t* v : {L"7.1", L"7.2", L"7.3", L"7.4", L"7.5"})
             SendMessageW(ver, CB_ADDSTRING, 0, LPARAM(v));
 
+        SendDlgItemMessageW(dlg, IDC_SHARPEN, TBM_SETRANGE, TRUE, MAKELPARAM(0, 100));
+        SendDlgItemMessageW(dlg, IDC_SHARPEN, TBM_SETPAGESIZE, 0, 10);
         FillLanguages(dlg);
         ApplyTexts(dlg, st);
         Fill(dlg, st, *st->opt);
@@ -458,6 +524,13 @@ INT_PTR CALLBACK DialogProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam) {
                      0, 0, SWP_NOSIZE | SWP_NOZORDER);
         return TRUE;
     }
+    case WM_HSCROLL:
+        if (reinterpret_cast<HWND>(lParam) == GetDlgItem(dlg, IDC_SHARPEN)) {
+            const int v = int(SendDlgItemMessageW(dlg, IDC_SHARPEN, TBM_GETPOS, 0, 0));
+            SetDlgItemTextW(dlg, IDC_SHARPEN_VAL, (std::to_wstring(v) + L"%").c_str());
+            return TRUE;
+        }
+        break;
     case WM_COMMAND: {
         DialogState* st = reinterpret_cast<DialogState*>(GetWindowLongPtrW(dlg, DWLP_USER));
         switch (LOWORD(wParam)) {
@@ -473,9 +546,28 @@ INT_PTR CALLBACK DialogProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam) {
         case IDC_RESET: {
             vtf::Options d = DefaultOptions();
             d.frameOrder = st->opt->frameOrder;  // "reset" keeps the animation choice
+            d.animAlpha = st->opt->animAlpha;
             d.animate = IsDlgButtonChecked(dlg, IDC_ANIMATE) == BST_CHECKED;
             Fill(dlg, st, d);
             UpdateInfo(dlg, st);
+            return TRUE;
+        }
+        case IDC_PREVIEW: {
+            vtf::Options tmp = *st->opt;
+            Collect(dlg, tmp);
+            std::vector<std::vector<uint8_t>> frames;
+            HCURSOR old = SetCursor(LoadCursor(nullptr, IDC_WAIT));
+            const bool ok = st->fetch && *st->fetch && (*st->fetch)(tmp.alphaSource, tmp.animate, tmp.frameOrder, frames);
+            SetCursor(old);
+            if (!ok) {
+                MessageBoxW(dlg, lang::T("preview.unavailable").c_str(), lang::T("msg.title").c_str(), MB_OK | MB_ICONWARNING);
+                return TRUE;
+            }
+            // The preview shows the size after resizing; the source is the document.
+            if (ShowPreviewDialog(dlg, tmp, frames, uint32_t(st->width), uint32_t(st->height))) {
+                Fill(dlg, st, tmp);  // filter, sharpening and DXT quality chosen in the preview
+                UpdateInfo(dlg, st);
+            }
             return TRUE;
         }
         case IDC_MIPMAPS:
@@ -491,7 +583,7 @@ INT_PTR CALLBACK DialogProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam) {
         case IDC_MAXH:
         case IDC_FORMAT:
         case IDC_VERSION:
-            if (HIWORD(wParam) == CBN_SELCHANGE) UpdateInfo(dlg, st);
+            if (HIWORD(wParam) == CBN_SELCHANGE) { UpdateEnabled(dlg, st); UpdateInfo(dlg, st); }
             return TRUE;
         case IDC_LANG:
             if (HIWORD(wParam) == CBN_SELCHANGE) {
@@ -555,8 +647,13 @@ vtf::Options LoadOptions() {
     o.thumbnail = ReadDword(key, L"Thumbnail", o.thumbnail) != 0;
     o.flags = ReadDword(key, L"Flags", o.flags) & vtf::USER_FLAGS_MASK;
     o.frameOrder = int(ReadDword(key, L"FrameOrder", DWORD(o.frameOrder)));
+    o.animAlpha = int(ReadDword(key, L"AnimAlpha", DWORD(o.animAlpha)));
     o.vmt = ReadDword(key, L"Vmt", o.vmt) != 0;
     o.vmtShader = int(ReadDword(key, L"VmtShader", DWORD(o.vmtShader)));
+    o.dxtQuality = int(ReadDword(key, L"DxtQuality", DWORD(o.dxtQuality)));
+    o.mipSharpen = int(ReadDword(key, L"MipSharpen", DWORD(o.mipSharpen)));
+    o.sharpenAlpha = ReadDword(key, L"MipSharpenAlpha", o.sharpenAlpha ? 1 : 0) != 0;
+    o.alphaSource = int(ReadDword(key, L"AlphaSource", DWORD(o.alphaSource)));
     o.animate = false;  // never remembered: depends on the document
     RegCloseKey(key);
     return SanitizeOptions(o);
@@ -573,6 +670,7 @@ vtf::Options SanitizeOptions(vtf::Options o) {
     o.colorFormat = kFormats[idx].color;
     o.alphaFormat = kFormats[idx].alpha;
     if (o.frameOrder < 0 || o.frameOrder > 1) o.frameOrder = d.frameOrder;
+    if (o.animAlpha < 0 || o.animAlpha > 2) o.animAlpha = d.animAlpha;
     if (o.versionMinor < 1 || o.versionMinor > 5) o.versionMinor = d.versionMinor;
     if (o.resizeMethod < 0 || o.resizeMethod > 2) o.resizeMethod = d.resizeMethod;
     if (o.resizeFilter < 0 || o.resizeFilter >= vtf::FILTER_COUNT) o.resizeFilter = d.resizeFilter;
@@ -581,6 +679,11 @@ vtf::Options SanitizeOptions(vtf::Options o) {
     if (MaxSizeIndex(o.maxHeight) == 0) o.maxHeight = 0;
     o.flags &= vtf::USER_FLAGS_MASK;
     if (o.vmtShader < 0 || o.vmtShader >= vmt::SHADER_COUNT) o.vmtShader = d.vmtShader;
+    if (o.dxtQuality < 0 || o.dxtQuality >= vtf::DXT_QUALITY_COUNT) o.dxtQuality = d.dxtQuality;
+    if (o.mipSharpen < 0 || o.mipSharpen > 100) o.mipSharpen = d.mipSharpen;
+    if (o.alphaSource < 0 || (o.alphaSource > 2 && o.alphaSource < vtf::ALPHA_SOURCE_CHANNEL_FIRST) ||
+        o.alphaSource > vtf::ALPHA_SOURCE_CHANNEL_FIRST + 250)
+        o.alphaSource = d.alphaSource;
     return o;
 }
 
@@ -604,8 +707,13 @@ void SaveOptions(const vtf::Options& o) {
     WriteDword(key, L"Thumbnail", o.thumbnail);
     WriteDword(key, L"Flags", o.flags);
     WriteDword(key, L"FrameOrder", DWORD(o.frameOrder));
+    WriteDword(key, L"AnimAlpha", DWORD(o.animAlpha));
     WriteDword(key, L"Vmt", o.vmt);
     WriteDword(key, L"VmtShader", DWORD(o.vmtShader));
+    WriteDword(key, L"DxtQuality", DWORD(o.dxtQuality));
+    WriteDword(key, L"MipSharpen", DWORD(o.mipSharpen));
+    WriteDword(key, L"MipSharpenAlpha", o.sharpenAlpha ? 1 : 0);
+    WriteDword(key, L"AlphaSource", DWORD(o.alphaSource));
     RegCloseKey(key);
 }
 
@@ -632,8 +740,59 @@ void InitLanguage() {
 
 // --- UI entry points ---------------------------------------------------------------
 
-bool ShowOptionsDialog(HWND parent, vtf::Options& opt, int width, int height, int visibleLayers) {
-    DialogState st{&opt, width, height, visibleLayers, lang::Setting(), nullptr, {}};
+void FitLabel(HWND dlg, int labelId, int controlId) {
+    HWND label = GetDlgItem(dlg, labelId), ctrl = GetDlgItem(dlg, controlId);
+    if (!label || !ctrl) return;
+    auto rectOf = [&](HWND w) {
+        RECT r;
+        GetWindowRect(w, &r);
+        MapWindowPoints(nullptr, dlg, reinterpret_cast<POINT*>(&r), 2);
+        return r;
+    };
+    // Original layout, remembered on the first call: label left/right, control left/right.
+    const wchar_t* kProp = L"VTFBridge.FitLabel";
+    uintptr_t packed = reinterpret_cast<uintptr_t>(GetPropW(label, kProp));
+    RECT rl = rectOf(label), rc = rectOf(ctrl);
+    if (!packed) {
+        packed = (uintptr_t(uint16_t(rl.left)) << 48) | (uintptr_t(uint16_t(rl.right)) << 32) |
+                 (uintptr_t(uint16_t(rc.left)) << 16) | uintptr_t(uint16_t(rc.right));
+        SetPropW(label, kProp, reinterpret_cast<HANDLE>(packed));
+    }
+    const int l0 = int(uint16_t(packed >> 48)), r0 = int(uint16_t(packed >> 32));
+    const int c0 = int(uint16_t(packed >> 16)), c1 = int(uint16_t(packed));
+    wchar_t text[256] = {};
+    const int len = GetWindowTextW(label, text, 256);
+    HDC dc = GetDC(label);
+    HGDIOBJ old = SelectObject(dc, reinterpret_cast<HFONT>(SendMessageW(label, WM_GETFONT, 0, 0)));
+    SIZE sz = {};
+    GetTextExtentPoint32W(dc, text, len, &sz);
+    SelectObject(dc, old);
+    ReleaseDC(label, dc);
+    const int gap = c0 - r0;
+    const int need = sz.cx + 2;
+    int grow = std::max(0, need - (r0 - l0));
+    grow = std::min(grow, (c1 - c0) / 2);  // the control keeps at least half its width
+    SetWindowPos(label, nullptr, l0, rl.top, r0 - l0 + grow, rl.bottom - rl.top, SWP_NOZORDER | SWP_NOACTIVATE);
+    SetWindowPos(ctrl, nullptr, c0 + grow, rc.top, c1 - c0 - grow, rc.bottom - rc.top, SWP_NOZORDER | SWP_NOACTIVATE);
+    (void)gap;
+}
+
+void ForgetLabelLayout(HWND dlg) {
+    EnumChildWindows(dlg, [](HWND w, LPARAM) -> BOOL { RemovePropW(w, L"VTFBridge.FitLabel"); return TRUE; }, 0);
+}
+
+void FitMainLabels(HWND dlg) {
+    const std::pair<int, int> pairs[] = {
+        {IDC_LBL_FORMAT, IDC_FORMAT}, {IDC_LBL_VERSION, IDC_VERSION}, {IDC_LBL_ALPHA, IDC_ALPHA},
+        {IDC_LBL_METHOD, IDC_METHOD}, {IDC_LBL_RFILTER, IDC_RFILTER}, {IDC_LBL_MAXW, IDC_MAXW},
+        {IDC_LBL_MAXH, IDC_MAXH}, {IDC_LBL_MIPFILTER, IDC_MIPFILTER}, {IDC_LBL_SHARPEN, IDC_SHARPEN},
+        {IDC_LBL_ORDER, IDC_ORDER}};
+    for (const auto& p : pairs) FitLabel(dlg, p.first, p.second);
+}
+
+bool ShowOptionsDialog(HWND parent, vtf::Options& opt, int width, int height, int visibleLayers,
+                       const AlphaInfo& alpha, const FetchPixelsFn& fetch) {
+    DialogState st{&opt, width, height, visibleLayers, &alpha, &fetch, lang::Setting(), nullptr, {}};
     const INT_PTR r = DialogBoxParamW(g_hInstance, MAKEINTRESOURCEW(IDD_VTF_OPTIONS), parent,
                                       DialogProc, reinterpret_cast<LPARAM>(&st));
     return r == IDOK;
@@ -652,6 +811,8 @@ bool AskYesNo(HWND parent, const std::wstring& text) {
 }
 
 namespace {
+
+constexpr int kAboutSettings = 1000;
 
 HRESULT CALLBACK AboutCallback(HWND, UINT msg, WPARAM, LPARAM lParam, LONG_PTR) {
     if (msg == TDN_HYPERLINK_CLICKED)
@@ -683,12 +844,297 @@ void ShowAbout(HWND parent) {
         cfg.hInstance = g_hInstance;
         cfg.dwFlags = TDF_ENABLE_HYPERLINKS | TDF_ALLOW_DIALOG_CANCELLATION | TDF_POSITION_RELATIVE_TO_WINDOW;
         cfg.dwCommonButtons = TDCBF_OK_BUTTON;
+        const std::wstring settings = lang::T("about.settings");
+        const TASKDIALOG_BUTTON buttons[] = {{kAboutSettings, settings.c_str()}};
+        cfg.pButtons = buttons;
+        cfg.cButtons = 1;
+        cfg.nDefaultButton = IDOK;
         cfg.pszWindowTitle = title.c_str();
         cfg.pszMainIcon = TD_INFORMATION_ICON;
         cfg.pszContent = content.c_str();
         cfg.pfCallback = AboutCallback;
-        if (SUCCEEDED(taskDialog(&cfg, nullptr, nullptr, nullptr))) return;
+        int pressed = 0;
+        if (SUCCEEDED(taskDialog(&cfg, &pressed, nullptr, nullptr))) {
+            if (pressed == kAboutSettings) ShowSettingsDialog(parent);
+            return;
+        }
     }
-    MessageBoxW(parent, (text + L"\n\n" + url + L"\n" + lang::T("about.updates") + L": " + releases).c_str(), title.c_str(),
-                MB_OK | MB_ICONINFORMATION);
+    if (MessageBoxW(parent, (text + L"\n\n" + url + L"\n" + lang::T("about.updates") + L": " + releases + L"\n\n" +
+                             lang::T("about.open_settings")).c_str(),
+                    title.c_str(), MB_YESNO | MB_ICONINFORMATION) == IDYES)
+        ShowSettingsDialog(parent);
+}
+
+// --- Settings ------------------------------------------------------------------------
+
+namespace {
+
+struct SettingsState {
+    vtf::Options opt;
+    int alphaShown = 0;  // index shown in the alpha list (stored channel choices show as Auto)
+};
+
+void SettingsTexts(HWND dlg, SettingsState* st) {
+    SetWindowTextW(dlg, lang::T("settings.title").c_str());
+    const std::pair<int, const char*> labels[] = {
+        {IDC_LBL_LANG, "dlg.language"}, {IDC_GRP_ST_OPEN, "settings.open_group"}, {IDC_LBL_ST_ANIMALPHA, "settings.anim_alpha"},
+        {IDC_LBL_ORDER, "dlg.frame_order"}, {IDC_GRP_ST_SAVE, "settings.save_group"}, {IDC_ST_SAVE_HINT, "settings.save_hint"},
+        {IDC_LBL_DXTQ, "dlg.dxt_quality"}, {IDC_LBL_ALPHA, "dlg.alpha"}, {IDC_LBL_MIPFILTER, "dlg.mip_filter"},
+        {IDC_LBL_SHARPEN, "dlg.sharpen"}, {IDC_SHARPEN_ALPHA, "dlg.sharpen_alpha"}, {IDC_TILING, "dlg.tiling"},
+        {IDC_VMT, "dlg.vmt"}, {IDC_LBL_ST_SHADER, "settings.shader"}, {IDC_RESET, "settings.reset"},
+        {IDOK, "settings.ok"}, {IDCANCEL, "dlg.cancel"}};
+    for (const auto& l : labels) SetDlgItemTextW(dlg, l.first, lang::T(l.second).c_str());
+    std::vector<std::wstring> items;
+    for (const char* k : {"animalpha.layers", "animalpha.transparency", "animalpha.ask"}) items.push_back(lang::T(k));
+    FillCombo(dlg, IDC_ST_ANIMALPHA, items);
+    items.clear();
+    for (const char* o : kFrameOrders) items.push_back(lang::T(o));
+    FillCombo(dlg, IDC_ORDER, items);
+    items.clear();
+    for (const char* q : kDxtQualities) items.push_back(lang::T(q));
+    FillCombo(dlg, IDC_DXTQ, items);
+    items.clear();
+    for (const char* k : {"alpha.auto", "alpha.transparency", "alpha.none"}) items.push_back(lang::T(k));
+    FillCombo(dlg, IDC_ALPHA, items);
+    items.clear();
+    for (int f = 0; f < vtf::FILTER_COUNT; ++f) { const char* n = vtf::FilterName(f); items.push_back(std::wstring(n, n + std::strlen(n))); }
+    FillCombo(dlg, IDC_MIPFILTER, items);
+    items.clear();
+    for (int i = 0; i < vmt::SHADER_COUNT; ++i) { const char* n = vmt::ShaderName(i); items.push_back(std::wstring(n, n + std::strlen(n))); }
+    FillCombo(dlg, IDC_SHADER, items);
+    for (int id : {IDC_LBL_ST_ANIMALPHA, IDC_LBL_ORDER, IDC_LBL_DXTQ, IDC_LBL_ALPHA, IDC_LBL_MIPFILTER, IDC_LBL_SHARPEN, IDC_LBL_LANG}) (void)id;
+    (void)st;
+}
+
+void SettingsFill(HWND dlg, SettingsState* st) {
+    const vtf::Options& o = st->opt;
+    SendDlgItemMessageW(dlg, IDC_ST_ANIMALPHA, CB_SETCURSEL, o.animAlpha, 0);
+    SendDlgItemMessageW(dlg, IDC_ORDER, CB_SETCURSEL, o.frameOrder, 0);
+    SendDlgItemMessageW(dlg, IDC_DXTQ, CB_SETCURSEL, o.dxtQuality, 0);
+    st->alphaShown = o.alphaSource >= 0 && o.alphaSource <= vtf::ALPHA_SOURCE_NONE ? o.alphaSource : 0;
+    SendDlgItemMessageW(dlg, IDC_ALPHA, CB_SETCURSEL, st->alphaShown, 0);
+    SendDlgItemMessageW(dlg, IDC_MIPFILTER, CB_SETCURSEL, o.mipFilter, 0);
+    SendDlgItemMessageW(dlg, IDC_SHARPEN, TBM_SETRANGE, TRUE, MAKELPARAM(0, 100));
+    SendDlgItemMessageW(dlg, IDC_SHARPEN, TBM_SETPAGESIZE, 0, 10);
+    SendDlgItemMessageW(dlg, IDC_SHARPEN, TBM_SETPOS, TRUE, o.mipSharpen);
+    SetDlgItemTextW(dlg, IDC_SHARPEN_VAL, (std::to_wstring(o.mipSharpen) + L"%").c_str());
+    CheckDlgButton(dlg, IDC_SHARPEN_ALPHA, o.sharpenAlpha ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(dlg, IDC_TILING, o.tiling ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(dlg, IDC_VMT, o.vmt ? BST_CHECKED : BST_UNCHECKED);
+    SendDlgItemMessageW(dlg, IDC_SHADER, CB_SETCURSEL, o.vmtShader, 0);
+    EnableWindow(GetDlgItem(dlg, IDC_SHADER), o.vmt);
+    EnableWindow(GetDlgItem(dlg, IDC_LBL_ST_SHADER), o.vmt);
+}
+
+void SettingsCollect(HWND dlg, SettingsState* st) {
+    vtf::Options& o = st->opt;
+    auto sel = [&](int id) { return int(SendDlgItemMessageW(dlg, id, CB_GETCURSEL, 0, 0)); };
+    if (sel(IDC_ST_ANIMALPHA) >= 0) o.animAlpha = sel(IDC_ST_ANIMALPHA);
+    if (sel(IDC_ORDER) >= 0) o.frameOrder = sel(IDC_ORDER);
+    if (sel(IDC_DXTQ) >= 0) o.dxtQuality = sel(IDC_DXTQ);
+    if (sel(IDC_ALPHA) >= 0 && sel(IDC_ALPHA) != st->alphaShown) o.alphaSource = sel(IDC_ALPHA);  // keep a channel choice unless changed
+    if (sel(IDC_MIPFILTER) >= 0) o.mipFilter = sel(IDC_MIPFILTER);
+    o.mipSharpen = int(SendDlgItemMessageW(dlg, IDC_SHARPEN, TBM_GETPOS, 0, 0));
+    o.sharpenAlpha = IsDlgButtonChecked(dlg, IDC_SHARPEN_ALPHA) == BST_CHECKED;
+    o.tiling = IsDlgButtonChecked(dlg, IDC_TILING) == BST_CHECKED;
+    o.vmt = IsDlgButtonChecked(dlg, IDC_VMT) == BST_CHECKED;
+    if (sel(IDC_SHADER) >= 0) o.vmtShader = sel(IDC_SHADER);
+}
+
+void SettingsFit(HWND dlg) {
+    const std::pair<int, int> pairs[] = {{IDC_LBL_LANG, IDC_LANG}, {IDC_LBL_ST_ANIMALPHA, IDC_ST_ANIMALPHA}, {IDC_LBL_ORDER, IDC_ORDER},
+                                         {IDC_LBL_DXTQ, IDC_DXTQ}, {IDC_LBL_ALPHA, IDC_ALPHA}, {IDC_LBL_MIPFILTER, IDC_MIPFILTER},
+                                         {IDC_LBL_SHARPEN, IDC_SHARPEN}, {IDC_LBL_ST_SHADER, IDC_SHADER}};
+    for (const auto& p : pairs) FitLabel(dlg, p.first, p.second);
+}
+
+INT_PTR CALLBACK SettingsProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam) {
+    SettingsState* st = reinterpret_cast<SettingsState*>(GetWindowLongPtrW(dlg, DWLP_USER));
+    switch (msg) {
+    case WM_INITDIALOG:
+        st = reinterpret_cast<SettingsState*>(lParam);
+        SetWindowLongPtrW(dlg, DWLP_USER, lParam);
+        SettingsTexts(dlg, st);
+        SettingsFill(dlg, st);
+        FillLanguages(dlg);
+        SettingsFit(dlg);
+        return TRUE;
+    case WM_DESTROY:
+        ForgetLabelLayout(dlg);
+        break;
+    case WM_HSCROLL:
+        if (st && reinterpret_cast<HWND>(lParam) == GetDlgItem(dlg, IDC_SHARPEN)) {
+            const int v = int(SendDlgItemMessageW(dlg, IDC_SHARPEN, TBM_GETPOS, 0, 0));
+            SetDlgItemTextW(dlg, IDC_SHARPEN_VAL, (std::to_wstring(v) + L"%").c_str());
+            return TRUE;
+        }
+        break;
+    case WM_COMMAND:
+        if (!st) break;
+        switch (LOWORD(wParam)) {
+        case IDC_VMT: {
+            const bool on = IsDlgButtonChecked(dlg, IDC_VMT) == BST_CHECKED;
+            EnableWindow(GetDlgItem(dlg, IDC_SHADER), on);
+            EnableWindow(GetDlgItem(dlg, IDC_LBL_ST_SHADER), on);
+            return TRUE;
+        }
+        case IDC_LANG:
+            if (HIWORD(wParam) == CBN_SELCHANGE) {
+                HWND combo = GetDlgItem(dlg, IDC_LANG);
+                const LRESULT data = SendMessageW(combo, CB_GETITEMDATA, SendMessageW(combo, CB_GETCURSEL, 0, 0), 0);
+                const auto& list = lang::Available();
+                lang::Select(data < 0 || size_t(data) >= list.size() ? std::wstring(L"auto") : list[size_t(data)].code);
+                SettingsCollect(dlg, st);
+                SettingsTexts(dlg, st);
+                SettingsFill(dlg, st);
+                FillLanguages(dlg);
+                SettingsFit(dlg);
+            }
+            return TRUE;
+        case IDC_RESET: {
+            vtf::Options d;
+            st->opt = d;
+            SettingsFill(dlg, st);
+            return TRUE;
+        }
+        case IDOK:
+            SettingsCollect(dlg, st);
+            SaveOptions(st->opt);
+            WriteLanguageSetting(lang::Setting());
+            EndDialog(dlg, IDOK);
+            return TRUE;
+        case IDCANCEL:
+            EndDialog(dlg, IDCANCEL);
+            return TRUE;
+        }
+        break;
+    }
+    return FALSE;
+}
+
+} // namespace
+
+void ShowSettingsDialog(HWND parent) {
+    InitLanguage();
+    SettingsState st;
+    st.opt = LoadOptions();
+    const std::wstring before = lang::Setting();
+    if (DialogBoxParamW(g_hInstance, MAKEINTRESOURCEW(IDD_VTF_SETTINGS), parent, SettingsProc, reinterpret_cast<LPARAM>(&st)) != IDOK)
+        lang::Select(before);  // cancelled: back to the previous language
+}
+
+namespace {
+
+// Choice buttons drawn by hand: bold title, details below, the same left margin
+// for every line (a multi-line push button does not indent wrapped lines).
+struct AskState {
+    HFONT bold = nullptr;
+};
+
+void DrawChoice(const DRAWITEMSTRUCT* di, HFONT bold, const std::wstring& text) {
+    HDC dc = di->hDC;
+    RECT rc = di->rcItem;
+    const bool pressed = (di->itemState & ODS_SELECTED) != 0, focus = (di->itemState & ODS_FOCUS) != 0;
+    // Themed push-button background (uxtheme loaded on demand), classic frame as fallback.
+    typedef HANDLE(WINAPI * OpenThemeFn)(HWND, LPCWSTR);
+    typedef HRESULT(WINAPI * DrawBgFn)(HANDLE, HDC, int, int, const RECT*, const RECT*);
+    typedef HRESULT(WINAPI * CloseThemeFn)(HANDLE);
+    static HMODULE ux = LoadLibraryW(L"uxtheme.dll");
+    static auto openTheme = ux ? reinterpret_cast<OpenThemeFn>(GetProcAddress(ux, "OpenThemeData")) : nullptr;
+    static auto drawBg = ux ? reinterpret_cast<DrawBgFn>(GetProcAddress(ux, "DrawThemeBackground")) : nullptr;
+    static auto closeTheme = ux ? reinterpret_cast<CloseThemeFn>(GetProcAddress(ux, "CloseThemeData")) : nullptr;
+    HANDLE theme = openTheme && drawBg && closeTheme ? openTheme(di->hwndItem, L"BUTTON") : nullptr;
+    if (theme) {
+        const int state = pressed ? 3 /*PBS_PRESSED*/ : focus ? 5 /*PBS_DEFAULTED*/ : 1 /*PBS_NORMAL*/;
+        drawBg(theme, dc, 1 /*BP_PUSHBUTTON*/, state, &rc, nullptr);
+        closeTheme(theme);
+    } else {
+        DrawFrameControl(dc, &rc, DFC_BUTTON, DFCS_BUTTONPUSH | (pressed ? DFCS_PUSHED : 0));
+    }
+    const size_t nl = text.find(L'\n');
+    const std::wstring title = text.substr(0, nl), details = nl == std::wstring::npos ? L"" : text.substr(nl + 1);
+    const int pad = MulDiv(10, GetDeviceCaps(dc, LOGPIXELSX), 96);
+    RECT tr = {rc.left + pad, rc.top + pad / 2 + 2, rc.right - pad, rc.bottom - pad / 2};
+    if (pressed) OffsetRect(&tr, 1, 1);
+    SetBkMode(dc, TRANSPARENT);
+    SetTextColor(dc, GetSysColor(COLOR_BTNTEXT));
+    HFONT normal = reinterpret_cast<HFONT>(SendMessageW(di->hwndItem, WM_GETFONT, 0, 0));
+    HGDIOBJ old = SelectObject(dc, bold ? bold : normal);
+    RECT measure = tr;
+    DrawTextW(dc, title.c_str(), -1, &measure, DT_LEFT | DT_WORDBREAK | DT_CALCRECT | DT_NOPREFIX);
+    DrawTextW(dc, title.c_str(), -1, &tr, DT_LEFT | DT_WORDBREAK | DT_NOPREFIX);
+    tr.top = measure.bottom + 1;
+    SelectObject(dc, normal);
+    DrawTextW(dc, details.c_str(), -1, &tr, DT_LEFT | DT_WORDBREAK | DT_NOPREFIX);
+    SelectObject(dc, old);
+    if (focus && !(di->itemState & ODS_NOFOCUSRECT)) {
+        RECT f = rc;
+        InflateRect(&f, -3, -3);
+        DrawFocusRect(dc, &f);
+    }
+}
+
+INT_PTR CALLBACK AskProc(HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam) {
+    AskState* st = reinterpret_cast<AskState*>(GetWindowLongPtrW(dlg, DWLP_USER));
+    switch (msg) {
+    case WM_INITDIALOG: {
+        st = reinterpret_cast<AskState*>(lParam);
+        SetWindowLongPtrW(dlg, DWLP_USER, lParam);
+        SetWindowTextW(dlg, lang::T("msg.title").c_str());
+        LOGFONTW lf = {};
+        if (GetObjectW(reinterpret_cast<HFONT>(SendMessageW(dlg, WM_GETFONT, 0, 0)), sizeof(lf), &lf)) {
+            lf.lfWeight = FW_BOLD;
+            st->bold = CreateFontIndirectW(&lf);
+        }
+        for (int id : {IDC_ASK_LAYERS, IDC_ASK_TRANSPARENCY}) {
+            HWND b = GetDlgItem(dlg, id);
+            SetWindowLongPtrW(b, GWL_STYLE, (GetWindowLongPtrW(b, GWL_STYLE) & ~LONG_PTR(0xF)) | BS_OWNERDRAW);
+        }
+        SetDlgItemTextW(dlg, IDC_ASK_TEXT, lang::T("ask.anim_alpha").c_str());
+        SetDlgItemTextW(dlg, IDC_ASK_LAYERS, lang::T("ask.layers").c_str());
+        SetDlgItemTextW(dlg, IDC_ASK_TRANSPARENCY, lang::T("ask.transparency").c_str());
+        SetDlgItemTextW(dlg, IDC_ASK_REMEMBER, lang::T("ask.remember").c_str());
+        SetDlgItemTextW(dlg, IDC_ASK_HINT, lang::T("ask.remember_hint").c_str());
+        SetDlgItemTextW(dlg, IDCANCEL, lang::T("dlg.cancel").c_str());
+        SetFocus(GetDlgItem(dlg, IDC_ASK_LAYERS));
+        return FALSE;
+    }
+    case WM_DRAWITEM: {
+        const DRAWITEMSTRUCT* di = reinterpret_cast<const DRAWITEMSTRUCT*>(lParam);
+        if (st && (di->CtlID == IDC_ASK_LAYERS || di->CtlID == IDC_ASK_TRANSPARENCY)) {
+            DrawChoice(di, st->bold, lang::T(di->CtlID == IDC_ASK_LAYERS ? "ask.layers" : "ask.transparency"));
+            return TRUE;
+        }
+        break;
+    }
+    case WM_DESTROY:
+        if (st && st->bold) { DeleteObject(st->bold); st->bold = nullptr; }
+        break;
+    case WM_COMMAND: {
+        const bool remember = IsDlgButtonChecked(dlg, IDC_ASK_REMEMBER) == BST_CHECKED;
+        switch (LOWORD(wParam)) {
+        case IDC_ASK_LAYERS: EndDialog(dlg, remember ? 10 : 0); return TRUE;
+        case IDC_ASK_TRANSPARENCY: EndDialog(dlg, remember ? 11 : 1); return TRUE;
+        case IDCANCEL: EndDialog(dlg, -1); return TRUE;
+        }
+        break;
+    }
+    }
+    return FALSE;
+}
+
+} // namespace
+
+int AskAnimAlpha(HWND parent) {
+    InitLanguage();
+    AskState st;
+    const INT_PTR r = DialogBoxParamW(g_hInstance, MAKEINTRESOURCEW(IDD_VTF_ASK), parent, AskProc, reinterpret_cast<LPARAM>(&st));
+    if (r < 0) return -1;
+    const int choice = int(r % 10);
+    if (r >= 10) {  // "Remember my choice"
+        vtf::Options o = LoadOptions();
+        o.animAlpha = choice;
+        SaveOptions(o);
+    }
+    return choice;
 }

@@ -37,6 +37,14 @@ bool Read(const uint8_t* data, size_t size, std::vector<uint8_t>& rgba,
 bool ReadFrames(const uint8_t* data, size_t size, std::vector<std::vector<uint8_t>>& frames,
                 ReadInfo& info, std::string& error);
 
+// Decodes every mip level of one frame (first face / slice): mips[0] = largest,
+// mips[m] is max(1, width >> m) x max(1, height >> m).
+bool ReadMips(const uint8_t* data, size_t size, std::vector<std::vector<uint8_t>>& mips,
+              ReadInfo& info, std::string& error, uint32_t frame = 0);  // frame: animation frame
+
+// Decodes one image of `fmt` (w x h, as stored in a VTF) into RGBA8.
+bool DecodeImage(int32_t fmt, const uint8_t* data, size_t size, uint32_t w, uint32_t h, std::vector<uint8_t>& rgba);
+
 // True if the buffer starts with the VTF signature.
 bool IsVtf(const uint8_t* data, size_t size);
 

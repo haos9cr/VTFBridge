@@ -41,12 +41,12 @@ static Layer* g_cur = nullptr;
 static OSErr ReadAdvance() {  // plug-in -> document (open)
     const VRect r = g_fr.theRect32;
     const int n = g_fr.hiPlane - g_fr.loPlane + 1;
-    if (g_fr.planeBytes != 1 || r.left != 0 || r.right != g_w || r.bottom > g_h || n != 4) return -2;
+    if (g_fr.planeBytes != 1 || r.left != 0 || r.right != g_w || r.bottom > g_h || n != g_fr.planes || (n != 3 && n != 4)) return -2;
     for (int y = r.top; y < r.bottom; ++y)
         for (int x = 0; x < g_w; ++x)
             for (int p = 0; p < 4; ++p)
-                g_cur->rgba[(size_t(y) * g_w + x) * 4 + p] =
-                    ((uint8_t*)g_fr.data)[size_t(y - r.top) * g_fr.rowBytes + size_t(x) * g_fr.colBytes + p];
+                g_cur->rgba[(size_t(y) * g_w + x) * 4 + p] = p < n ?
+                    ((uint8_t*)g_fr.data)[size_t(y - r.top) * g_fr.rowBytes + size_t(x) * g_fr.colBytes + p] : 255;
     return 0;
 }
 
@@ -76,6 +76,9 @@ static ReadChannelDesc* Chan(const std::vector<uint8_t>* rgba, int component, Re
 }
 
 static std::vector<uint8_t> g_merged;
+// Alpha channels of the document (Channels panel): name + RGBA buffer, value in A.
+struct AlphaChan { std::string name; std::vector<uint8_t> rgba; std::vector<uint16> wname; };
+static std::vector<AlphaChan> g_alphas;
 static ReadImageDocumentDesc g_doc;
 static std::vector<ReadLayerDesc> g_descs;
 static std::vector<std::vector<uint16>> g_names;
@@ -87,6 +90,17 @@ static void BuildDocumentInfo() {
     g_doc.layerCount = int32(g_layers.size());
     g_doc.mergedCompositeChannels = Chan(&g_merged, 0, Chan(&g_merged, 1, Chan(&g_merged, 2, nullptr)));
     g_doc.mergedTransparency = Chan(&g_merged, 3, nullptr);
+    ReadChannelDesc* prev = nullptr;
+    for (auto& a : g_alphas) {
+        ReadChannelDesc* c = Chan(&a.rgba, 3, nullptr);
+        a.wname.assign(a.name.begin(), a.name.end());
+        a.wname.push_back(0);
+        c->name = a.name.c_str();
+        c->unicodeName = a.wname.data();
+        c->maxVersion = 3;
+        if (prev) prev->next = c; else g_doc.alphaChannels = c;
+        prev = c;
+    }
     g_descs.assign(g_layers.size(), ReadLayerDesc());
     g_names.assign(g_layers.size(), {});
     for (size_t i = 0; i < g_layers.size(); ++i) {
@@ -140,16 +154,21 @@ static bool Open(const char* path) {
     g_fr.advanceState = ReadAdvance;
     const uint32 n = g_fr.layerData;
     if (n > 0) {
-        CHECK(g_fr.planes == 4 && g_fr.transparencyPlane == 3, "layered planes %d tp %d", g_fr.planes, g_fr.transparencyPlane);
+        const bool alphaLayers = g_fr.planes == 3;  // "alpha as separate layers": opaque layers
+        CHECK((g_fr.planes == 4 && g_fr.transparencyPlane == 3) || (alphaLayers && g_fr.transparencyPlane == 0),
+              "layered planes %d tp %d", g_fr.planes, g_fr.transparencyPlane);
         for (uint32 i = 0; i < n; ++i) {
             g_layers.push_back(Layer());
             g_cur = &g_layers.back();
             g_cur->rgba.assign(size_t(g_w) * g_h * 4, 0);
             g_fr.layerName = nullptr;
+            g_fr.isVisible = 1;
             g_main(formatSelectorReadLayerStart, &g_fr, &data, &r);
-            g_cur->name = Utf8(g_fr.layerName);
             g_main(formatSelectorReadLayerContinue, &g_fr, &data, &r);
+            g_fr.layerName = nullptr;
             g_main(formatSelectorReadLayerFinish, &g_fr, &data, &r);
+            g_cur->name = Utf8(g_fr.layerName);  // the SDK reads it after ReadLayerFinish
+            g_cur->visible = g_fr.isVisible != 0;
             CHECK(r == 0, "layer %u result %d", i, r);
         }
     }
@@ -200,6 +219,7 @@ int main(int argc, char** argv) {
         std::printf("[order %s]\n", order ? "top-down" : "bottom-up");
         RegDeleteKeyA(HKEY_CURRENT_USER, "Software\\VTFBridge");
         SetReg("FrameOrder", DWORD(order));
+        SetReg("AnimAlpha", 1);  // frames as layers with transparency
         SetReg("ColorFormat", 12); SetReg("AlphaFormat", 12);  // irrelevant: revert decides
 
         CHECK(Open(argv[2]), "not opened as layers");
@@ -258,6 +278,79 @@ int main(int argc, char** argv) {
         auto saved = Frames(Save(outDir + "\\plain_multilayer.vtf"));
         CHECK(saved.size() == 1 && saved[0][0] == 77, "plain multi-layer: %zu frames", saved.size());
         std::printf("  merged single frame checked\n");
+    }
+
+    // 5. Alpha source: Auto / transparency / none / a named channel (merged-document path).
+    {
+        std::printf("[alpha source]\n");
+        auto alphaOf = [&](DWORD source, const char* tag) {
+            RegDeleteKeyA(HKEY_CURRENT_USER, "Software\\VTFBridge");
+            SetReg("ColorFormat", 12); SetReg("AlphaFormat", 12);  // BGRA8888: alpha kept exactly
+            SetReg("AlphaSource", source);
+            std::memset(&g_fr, 0, sizeof(g_fr));
+            g_fr.HostSupports32BitCoordinates = 1;
+            g_fr.handleProcs = &g_hp;
+            g_fr.imageSize32.h = g_w; g_fr.imageSize32.v = g_h;
+            auto f = Frames(Save(outDir + "\\alpha_" + tag + ".vtf"));
+            return f.empty() ? -1 : int(f[0][3]);
+        };
+        g_w = 32; g_h = 16;
+        g_fr.imageSize32.h = g_w; g_fr.imageSize32.v = g_h;
+        g_layers.assign(2, Layer());
+        for (auto& L : g_layers) L.rgba.assign(32 * 16 * 4, 120);
+        g_alphas.clear();
+        CHECK(alphaOf(0, "auto_nochannel") == 77, "auto without channels must use the transparency");
+        g_alphas.push_back({"Alpha 1", std::vector<uint8_t>(32 * 16 * 4, 200), {}});
+        g_alphas.push_back({"Spec", std::vector<uint8_t>(32 * 16 * 4, 33), {}});
+        CHECK(alphaOf(0, "auto") == 200, "auto must use the first alpha channel");
+        CHECK(alphaOf(1, "transparency") == 77, "transparency");
+        CHECK(alphaOf(2, "none") == 255, "none");
+        CHECK(alphaOf(101, "spec") == 33, "channel 'Spec'");
+        CHECK(alphaOf(105, "missing") == 200, "missing channel must fall back to auto");
+        g_alphas.clear();
+        std::printf("  auto / transparency / none / channel / missing channel checked\n");
+    }
+
+    // 6. "Alpha as separate layers": opaque colour layer + hidden grey alpha layer per frame;
+    //    saving pairs them up again ("Frame N" + "Frame N Alpha").
+    {
+        std::printf("[alpha as separate layers]\n");
+        RegDeleteKeyA(HKEY_CURRENT_USER, "Software\\VTFBridge");
+        // (no registry value: hidden alpha layers are the default)
+        CHECK(Open(argv[2]), "not opened as layers");
+        CHECK(g_layers.size() == 2 * N, "layer count %zu (want %zu)", g_layers.size(), 2 * N);
+        for (size_t i = 0; i + 1 < g_layers.size(); i += 2) {
+            const size_t frame = i / 2;
+            const Layer& c = g_layers[i];
+            const Layer& a = g_layers[i + 1];
+            const std::string want = "Frame " + std::to_string(frame + 1);
+            CHECK(c.name == want && c.visible, "layer %zu: '%s' visible %d", i, c.name.c_str(), int(c.visible));
+            CHECK(a.name == want + " Alpha" && !a.visible, "layer %zu: '%s' visible %d", i + 1, a.name.c_str(), int(a.visible));
+            bool colourOk = true, alphaOk = true;
+            for (size_t p = 0; p < ref[frame].size(); p += 4) {
+                for (int k = 0; k < 3; ++k) colourOk &= c.rgba[p + k] == ref[frame][p + k];
+                colourOk &= c.rgba[p + 3] == 255;
+                for (int k = 0; k < 3; ++k) alphaOk &= a.rgba[p + k] == ref[frame][p + 3];
+            }
+            CHECK(colourOk, "frame %zu: colour layer not the opaque frame colour", frame);
+            CHECK(alphaOk, "frame %zu: alpha layer not the frame alpha", frame);
+        }
+        std::printf("  layers: ");
+        for (auto& L : g_layers) std::printf("'%s'%s ", L.name.c_str(), L.visible ? "" : "(hidden)");
+        std::printf("\n");
+
+        auto saved = Frames(Save(outDir + "\\alphalayers_resave.vtf"));
+        CHECK(saved.size() == N, "alpha layers resave: %zu frames", saved.size());
+        for (size_t f = 0; f < saved.size() && f < N; ++f) CHECK(saved[f] == ref[f], "alpha layers resave: frame %zu differs", f);
+
+        // Edit: frame 1's alpha layer painted grey 10, and shown -> still not a frame.
+        for (size_t p = 0; p < g_layers[1].rgba.size(); p += 4) g_layers[1].rgba[p] = g_layers[1].rgba[p + 1] = g_layers[1].rgba[p + 2] = 10;
+        g_layers[1].visible = true;
+        saved = Frames(Save(outDir + "\\alphalayers_edit.vtf"));
+        CHECK(saved.size() == N, "edited alpha layer: %zu frames", saved.size());
+        if (!saved.empty()) CHECK(saved[0][3] == 10 && saved[0][0] == ref[0][0], "edited alpha: a=%d", saved[0][3]);
+        std::printf("  open / resave / edited alpha layer checked\n");
+        RegDeleteKeyA(HKEY_CURRENT_USER, "Software\\VTFBridge");
     }
 
     std::printf("failures: %d\n", g_fail);

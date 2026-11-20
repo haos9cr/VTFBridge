@@ -39,6 +39,10 @@ struct FloatImage {
 FloatImage ToFloat(const uint8_t* rgba, uint32_t w, uint32_t h, bool gamma);
 void ToBytes(const FloatImage& img, bool gamma, std::vector<uint8_t>& out);
 
+// Unsharp mask on RGB (alpha untouched): img += amount * (img - blur3x3(img)),
+// clamped to 0..1. Edges wrap or clamp like the resampler.
+void Sharpen(FloatImage& img, float amount, bool wrapX, bool wrapY, bool alpha = false);
+
 // Resizes `src` to dw x dh. wrapX / wrapY: tile across the edges (for textures
 // that repeat) instead of clamping. Output is clamped to [0, 1].
 FloatImage Resample(const FloatImage& src, uint32_t dw, uint32_t dh, Filter filter,

@@ -45,6 +45,65 @@ const Builtin kStrings[] = {
     {"dlg.mipmaps",       L"Generate mipmaps"},
     {"dlg.mip_filter",    L"Mipmap filter:"},
     {"dlg.gamma",         L"Gamma-correct filtering (resize and mipmaps)"},
+    {"dlg.dxt_quality",   L"Quality:"},
+    {"dxtq.fast",         L"Fast (stb_dxt)"},
+    {"dxtq.high",         L"High (icbc)"},
+    {"dxtq.best",         L"Best (icbc)"},
+    {"dxtq.max",          L"VTFBridge: Accurate"},
+    {"dxtq.perceptual",   L"VTFBridge: Perceptual"},
+    {"dlg.alpha",         L"Alpha:"},
+    {"alpha.auto_channel",      L"Auto: channel \u201C{name}\u201D"},
+    {"alpha.auto_transparency", L"Auto: transparency"},
+    {"alpha.auto_none",         L"Auto: none"},
+    {"alpha.transparency",      L"Layer transparency (like PNG)"},
+    {"alpha.none",              L"None (opaque)"},
+    {"alpha.channel",           L"Channel \u201C{name}\u201D"},
+    {"dlg.sharpen",       L"Mipmap sharpness:"},
+    {"dlg.sharpen_alpha", L"Alpha too"},
+    {"dlg.preview",       L"Preview..."},
+    {"preview.title",  L"Texture preview"},
+    {"preview.level",  L"Level:"},
+    {"preview.level_item", L"Mip {n}: {w} x {h}"},
+    {"preview.auto",   L"Auto"},
+    {"preview.view",   L"View:"},
+    {"preview.view_rgb", L"Colour (RGB)"},
+    {"preview.view_alpha", L"Alpha"},
+    {"preview.view_checker", L"Colour on checkerboard"},
+    {"preview.zoom",   L"Zoom:"},
+    {"preview.fit",    L"Fit"},
+    {"preview.tile",   L"Tile"},
+    {"preview.mode",   L"Show:"},
+    {"preview.mode_result", L"Result"},
+    {"preview.mode_ref", L"Reference"},
+    {"preview.mode_split", L"Split: reference | result"},
+    {"preview.mode_diff", L"Difference (x{gain})"},
+    {"preview.mode_chain", L"Mip chain"},
+    {"preview.ref",    L"Reference:"},
+    {"preview.ref_uncompressed", L"Without compression"},
+    {"preview.ref_file_mips", L"File: {name} (mips from the file)"},
+    {"preview.ref_file_box",  L"File: {name} (mips: Box)"},
+    {"preview.ref_browse", L"Own image..."},
+    {"preview.file_filter", L"Images"},
+    {"preview.load_error", L"Could not open the image \"{name}\"."},
+    {"preview.resize_filter", L"Resize filter:"},
+    {"preview.sharpen", L"Sharpness:"},
+    {"preview.apply",  L"Apply"},
+    {"preview.info",   L"Mip {n}: {w} x {h}, {format}"},
+    {"preview.accuracy", L"accuracy {psnr} dB (PSNR) - {grade}"},
+    {"preview.accuracy_file", L"accuracy against \"{name}\": {psnr} dB (PSNR) - {grade}"},
+    {"preview.same_as_file", L"identical to \"{name}\""},
+    {"preview.grade_excellent", L"excellent"},
+    {"preview.grade_good", L"good"},
+    {"preview.grade_visible", L"visible loss"},
+    {"preview.grade_heavy", L"heavy loss"},
+    {"preview.lossless", L"no compression loss"},
+    {"preview.showing_ref", L"showing the reference"},
+    {"preview.hint",   L"Space: show the reference   Wheel: zoom   Drag: move"},
+    {"preview.computing", L"Computing..."},
+    {"preview.frame", L"Frame:"},
+    {"preview.frame_item", L"{n} of {count}"},
+    {"preview.ref_frames", L"({n} frames)"},
+    {"preview.unavailable", L"Photoshop did not provide the image for the preview."},
     {"dlg.tiling",        L"Tiling texture (blend opposite edges when filtering)"},
     {"dlg.thumb",         L"Create thumbnail"},
     {"dlg.group_anim",    L"Animation"},
@@ -112,6 +171,31 @@ const Builtin kStrings[] = {
                               L"Leave it off for decals, sprites, UI and anything with a transparent border:\n"
                               L"otherwise pixels from one edge bleed into the opposite edge of the mipmaps.\n"
                               L"Clamp S / Clamp T turn it off for their direction."},
+    {"tip.dxt_quality",       L"How the DXT colours (and DXT5 alpha) of every 4x4 block are chosen.\n"
+                              L"Fast (stb_dxt): as in VTF Export 1.0 / VTFBridge 1.1.\n"
+                              L"High / Best (icbc by Ignacio Castano): third-party encoder; on very smooth\n"
+                              L"gradients it can leave visible steps. Best also gives a better DXT5 alpha.\n"
+                              L"VTFBridge: Accurate (default): stb_dxt + VTFBridge's own refinement -\n"
+                              L"the smoothest gradients, equally accurate on every graphics card, better DXT5 alpha.\n"
+                              L"VTFBridge: Perceptual: like Accurate, but errors count the way the eye sees them\n"
+                              L"(green > red > blue); not for masks or data. Normal maps always use Accurate."},
+    {"tip.alpha",             L"Where the alpha of the texture comes from:\n"
+                              L"Layer transparency - the checkerboard areas, like in a PNG.\n"
+                              L"Channel - an alpha channel from the Channels panel (a mask, e.g. for\n"
+                              L"$basealphaenvmapmask or $selfillum), while the image itself stays opaque.\n"
+                              L"None - the texture is saved without alpha.\n"
+                              L"Auto uses the first alpha channel if there is one, otherwise the transparency.\n"
+                              L"For animation frames, Auto and transparency use each layer's own transparency."},
+    {"tip.sharpen_alpha",     L"Sharpen the alpha channel of the mipmaps as well, so cut-outs ($alphatest),\n"
+                              L"fences, foliage and thin details do not fade out in the distance.\n"
+                              L"Leave it off for soft transparency gradients."},
+    {"tip.sharpen",           L"Sharpens every mipmap below the full-size image, so details stay readable\n"
+                              L"in the distance (like the sharpening of the old NVIDIA tools in VTFEdit).\n"
+                              L"0% = off. Too much gives bright halos on edges; check it in the preview."},
+    {"tip.preview",           L"Shows the texture exactly as it will be saved: every mipmap compressed and decoded back,\n"
+                              L"with the accuracy against a reference (the uncompressed mips or your own image).\n"
+                              L"Views: result, reference, split, difference, the whole mip chain; tiling, zoom, Auto level.\n"
+                              L"Filters, sharpness and DXT quality can be changed right in the preview."},
     {"tip.vmt",               L"Also writes a material next to the .vtf. $basetexture is the path after the\n"
                               L"\"materials\" folder. Alpha adds $alphatest (cut-out) or $translucent (soft),\n"
                               L"several frames add the AnimatedTexture proxy.\n"
@@ -120,6 +204,7 @@ const Builtin kStrings[] = {
                               L"UnlitGeneric: sprites, UI, no lighting"},
 
     {"layer.frame",       L"Frame {n}"},
+    {"layer.frame_alpha", L"Frame {n} Alpha"},
 
     {"msg.title",         L"VTFBridge"},
     {"msg.mode",          L"VTF: only RGB and Grayscale modes are supported."},
@@ -134,10 +219,36 @@ const Builtin kStrings[] = {
     {"msg.volume",        L"- it is a volume texture ({depth} slices): only the first slice is opened;"},
     {"msg.format_note",   L"Format: {format}"},
     {"msg.layer_error",   L"Cannot read layer \"{name}\" of the document."},
+    {"msg.alpha_error",   L"Cannot read the alpha channel of the document."},
     {"msg.vmt_error",     L"The texture is saved, but the material could not be written:\n{path}"},
     {"msg.vmt_no_path",   L"The texture is saved, but its folder is unknown, so no .vmt was created."},
 
     {"about.title",       L"About VTFBridge"},
+    {"about.settings", L"Settings..."},
+    {"about.open_settings", L"Open the settings?"},
+    {"settings.title", L"VTFBridge settings"},
+    {"settings.open_group", L"Opening animated VTF files"},
+    {"settings.anim_alpha", L"Frame alpha:"},
+    {"animalpha.layers", L"Hidden layer \"Frame N Alpha\""},
+    {"animalpha.transparency", L"Layer transparency"},
+    {"animalpha.ask", L"Ask every time"},
+    {"settings.save_group", L"Saving"},
+    {"settings.save_hint", L"The save dialog remembers the last values; here they can be set in advance."},
+    {"settings.shader", L"Shader:"},
+    {"settings.reset", L"Reset all"},
+    {"settings.ok", L"OK"},
+    {"alpha.auto", L"Auto"},
+    {"ask.anim_alpha", L"This animation has alpha. How should it open?"},
+    {"ask.layers", L"Hidden alpha layers\nOpaque \"Frame N\" + hidden \"Frame N Alpha\": the colour under transparent parts stays editable"},
+    {"ask.transparency", L"Layer transparency\nOrdinary layers with transparency, like a PNG"},
+    {"ask.remember", L"Remember my choice"},
+    {"ask.remember_hint", L"It can be changed later: Help > About Plug-ins > Valve Texture Format > Settings."},
+    {"tool.to_masks", L"VTFBridge: alpha layers to masks"},
+    {"tool.no_document", L"No document is open."},
+    {"tool.to_masks_none", L"No \"Frame N\" / \"Frame N Alpha\" layer pairs were found."},
+    {"tool.to_masks_done", L"Done: the alpha of {n} frame(s) is now in their layer masks."},
+    {"tool.errors", L"Could not process:"},
+    {"tool.script_error", L"The command could not be run (error {code})."},
     {"about.updates",     L"Check for updates"},
     {"about.text",        L"VTFBridge {version} for Adobe Photoshop (x64)\n\n"
                           L"Opens and saves Valve Texture Format (.vtf) files.\n"
@@ -146,7 +257,7 @@ const Builtin kStrings[] = {
                           L"power-of-two resize, mipmaps with 15 filters, thumbnail, flags, versions 7.1 - 7.5,\n"
                           L"optional .vmt material.\n\n"
                           L"Languages folder: {folder}\n\n"
-                          L"DXT compression: stb_dxt (public domain)."},
+                          L"DXT compression: stb_dxt (public domain), icbc by Ignacio Castano (MIT)."},
 };
 
 // Language files compiled into the plug-in.

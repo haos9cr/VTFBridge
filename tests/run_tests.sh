@@ -19,7 +19,7 @@ mkdir -p "$OUT"
 cd "$OUT"
 
 CXX="${CXX:-g++}"
-CXXFLAGS="-std=c++17 -O2 -I$ROOT/src -w"
+CXXFLAGS="-std=c++17 -O2 -pthread -I$ROOT/src -w"
 CORE="$ROOT/src/VtfWriter.cpp $ROOT/src/VtfReader.cpp $ROOT/src/Resample.cpp"
 PY="python3 -I"
 fail=0
@@ -63,6 +63,15 @@ mkdir -p edges
 run ./edge_test edges
 run $PY "$ROOT/tests/validate_edges.py" edges
 
+step "DXT quality levels and smooth gradients"
+$CXX $CXXFLAGS "$ROOT/tests/dxt_quality_test.cpp" $CORE -o dxt_quality_test
+mkdir -p dxtq
+run ./dxt_quality_test dxtq
+
+step "Mipmap preview data and sharpening"
+$CXX $CXXFLAGS "$ROOT/tests/preview_test.cpp" $CORE -o preview_test
+run ./preview_test
+
 step "VMT builder"
 $CXX $CXXFLAGS "$ROOT/tests/vmt_test.cpp" "$ROOT/src/Vmt.cpp" -o vmt_test
 run ./vmt_test
@@ -77,11 +86,11 @@ if [[ $WINE_TESTS == 1 ]]; then
 
     step "Cross-compiling VTFBridge.8bi against the SDK stub"
     $PY "$ROOT/tools/embed_lang.py" "$ROOT/lang" gen/lang_embedded.inc
-    sed '/VTFBridge.pipl/d' "$ROOT/src/VTFBridge.rc" > res.rc
+    sed '/VTFBridge.pipl/d;/JSON_PIPL/d' "$ROOT/src/VTFBridge.rc" > res.rc
     x86_64-w64-mingw32-windres -c 65001 -I "$ROOT/src" res.rc -O coff -o res.o
     $MCXX -std=c++17 -O2 -w -municode -DUNICODE -D_UNICODE -DNOMINMAX -D_WIN32_WINNT=0x0601 -I "$ROOT/src" -I "$STUB" -I gen -shared \
-        "$ROOT"/src/VTFBridge.cpp "$ROOT"/src/VTFBridgeUI.cpp "$ROOT"/src/Lang.cpp "$ROOT"/src/Vmt.cpp $CORE res.o \
-        -o VTFBridge.8bi -static -luser32 -ladvapi32 -lshell32 -lcomctl32
+        "$ROOT"/src/VTFBridge.cpp "$ROOT"/src/VTFBridgeUI.cpp "$ROOT"/src/VTFBridgePreview.cpp "$ROOT"/src/ImageLoad.cpp "$ROOT"/src/Lang.cpp "$ROOT"/src/Vmt.cpp $CORE res.o \
+        -o VTFBridge.8bi -static -luser32 -lgdi32 -ladvapi32 -lshell32 -lcomctl32 -lole32 -lcomdlg32 -luuid
     for t in fake_host fake_host_read; do
         $MCXX -std=c++17 -O2 -w -I "$STUB" "$ROOT/tests/$t.cpp" -o $t.exe -static -ladvapi32
     done
@@ -112,6 +121,19 @@ if [[ $WINE_TESTS == 1 ]]; then
     step "Fake host: animation as layers (order, names, hidden layer, merged image)"
     mkdir -p layers
     run wine fake_host_layers.exe VTFBridge.8bi "$(wpath anim/anim_bgra_75.vtf)" "$(wpath layers)"
+
+    step "Windows build of the DXT / preview tests (MinGW: 32-bit long, other compiler)"
+    $MCXX -std=c++17 -O2 -w -I "$ROOT/src" "$ROOT/tests/dxt_quality_test.cpp" $CORE -o dxt_quality_test.exe -static
+    $MCXX -std=c++17 -O2 -w -I "$ROOT/src" "$ROOT/tests/preview_test.cpp" $CORE -o preview_test.exe -static
+    mkdir -p dxtq_win
+    run_tail 6 wine dxt_quality_test.exe "$(wpath dxtq_win)"
+    run_tail 2 wine preview_test.exe
+
+    step "Reference image loader (TGA, BMP via WIC, VTF)"
+    $MCXX -std=c++17 -O2 -w -DUNICODE -D_UNICODE -I "$ROOT/src" "$ROOT/tests/imageload_test.cpp" "$ROOT/src/ImageLoad.cpp" $CORE \
+        -o imageload_test.exe -static -lole32 -luuid
+    mkdir -p imgload
+    run wine imageload_test.exe "$(wpath imgload)"
 
     step "Languages: embedded + folder, key-by-key override"
     mkdir -p langdir

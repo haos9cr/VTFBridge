@@ -305,7 +305,8 @@ Options ReadInfo::AsOptions(const Options& base) const {
 
 namespace {
 bool ReadImpl(const uint8_t* data, size_t size, std::vector<std::vector<uint8_t>>& frames, bool allFrames,
-              ReadInfo& info, std::string& error) {
+              ReadInfo& info, std::string& error, std::vector<std::vector<uint8_t>>* mips = nullptr,
+              uint32_t mipFrame = 0) {
     frames.clear();
     info = ReadInfo();
     if (!IsVtf(data, size) || size < 64) { error = "not a VTF file"; return false; }
@@ -359,10 +360,19 @@ bool ReadImpl(const uint8_t* data, size_t size, std::vector<std::vector<uint8_t>
 
     // Skip all smaller mips; they are stored first (smallest -> largest).
     uint64_t offset = hires;
+    if (mips) mips->assign(info.mipCount, {});
     for (uint32_t m = info.mipCount - 1; m >= 1; --m) {
         const uint32_t w = std::max(1u, info.width >> m), h = std::max(1u, info.height >> m);
         const uint32_t d = std::max(1u, info.depth >> m);
-        offset += SizeOf(info.format, w, h) * d * info.faces * info.frames;  // < 2^63, no overflow
+        const uint64_t one = SizeOf(info.format, w, h);
+        const uint64_t at = offset + one * d * info.faces * std::min(mipFrame, info.frames - 1);
+        if (mips && at + one <= size) {  // frame `mipFrame`, face 0, slice 0 of this mip
+            std::vector<uint8_t>& rgba = (*mips)[m];
+            rgba.assign(size_t(w) * h * 4, 255);
+            if (fi.blockBytes) DecodeBlocks(data + at, info.format, w, h, rgba.data());
+            else DecodeLinear(data + at, info.format, w, h, rgba.data());
+        }
+        offset += one * d * info.faces * info.frames;  // < 2^63, no overflow
         if (offset > size) { error = "file is truncated"; return false; }
     }
     // Top mip: frame 0 face 0 slice 0, frame 1 face 0 slice 0, ... (faces and
@@ -397,6 +407,23 @@ bool Read(const uint8_t* data, size_t size, std::vector<uint8_t>& rgba, ReadInfo
 bool ReadFrames(const uint8_t* data, size_t size, std::vector<std::vector<uint8_t>>& frames,
                 ReadInfo& info, std::string& error) {
     return ReadImpl(data, size, frames, true, info, error);
+}
+
+bool ReadMips(const uint8_t* data, size_t size, std::vector<std::vector<uint8_t>>& mips,
+              ReadInfo& info, std::string& error, uint32_t frame) {
+    std::vector<std::vector<uint8_t>> frames;
+    if (!ReadImpl(data, size, frames, frame > 0, info, error, &mips, frame)) return false;
+    mips[0].swap(frames[std::min<size_t>(frame, frames.size() - 1)]);
+    return true;
+}
+
+bool DecodeImage(int32_t fmt, const uint8_t* data, size_t size, uint32_t w, uint32_t h, std::vector<uint8_t>& rgba) {
+    const FormatInfo fi = Info(fmt);
+    if (!fi.readable || w == 0 || h == 0 || SizeOf(fmt, w, h) > size) return false;
+    rgba.assign(size_t(w) * h * 4, 255);
+    if (fi.blockBytes) DecodeBlocks(data, fmt, w, h, rgba.data());
+    else DecodeLinear(data, fmt, w, h, rgba.data());
+    return true;
 }
 
 } // namespace vtf

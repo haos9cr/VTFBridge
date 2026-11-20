@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <cwctype>
 #include <string>
 #include <vector>
 
@@ -46,6 +47,7 @@ bool g_haveOptions = false;
 struct PendingRead {
     std::vector<std::vector<uint8_t>> frames;  // RGBA8 per frame
     std::vector<uint32_t> layerFrames;         // layer i (in creation order) -> frame index
+    std::vector<bool> layerIsAlpha;            // layer i is the frame's alpha layer ("Frame n Alpha")
     size_t nextLayer = 0;
     bool layered = false;
     int32 width = 0, height = 0;
@@ -131,7 +133,7 @@ struct RevertBlob {
     uint8_t  mipmaps, gammaFilter, thumbnail, resize;
     uint8_t  animate, frameOrder;
     uint8_t  tiling;     // 0 = not stored (older blob), 1 = off, 2 = on
-    uint8_t  reserved;
+    uint8_t  alpha;      // 0 = not stored; 1..3 = auto / transparency / none; 4 + n = alpha channel n
 };
 constexpr uint32_t kRevertMagic = 0x58465456;  // "VTFX"
 constexpr uint32_t kRevertVersion = 3;
@@ -163,6 +165,7 @@ bool LoadRevert(FormatRecordPtr fr, vtf::Options& opt) {
     opt.animate = b.animate != 0;
     opt.frameOrder = b.frameOrder;
     if (b.tiling) opt.tiling = b.tiling == 2;
+    if (b.alpha) opt.alphaSource = b.alpha <= 3 ? b.alpha - 1 : vtf::ALPHA_SOURCE_CHANNEL_FIRST + (b.alpha - 4);
     else if ((opt.flags & vtf::FLAG_CLAMPS) && (opt.flags & vtf::FLAG_CLAMPT)) opt.tiling = false;
     opt = SanitizeOptions(opt);
     return true;
@@ -196,6 +199,9 @@ void StoreRevert(FormatRecordPtr fr, const vtf::Options& opt) {
     b.animate = opt.animate;
     b.frameOrder = uint8_t(opt.frameOrder);
     b.tiling = opt.tiling ? 2 : 1;
+    b.alpha = uint8_t(opt.alphaSource >= vtf::ALPHA_SOURCE_CHANNEL_FIRST
+                          ? std::min(255, 4 + opt.alphaSource - vtf::ALPHA_SOURCE_CHANNEL_FIRST)
+                          : 1 + std::max(0, std::min(2, opt.alphaSource)));
     Ptr p = hp->lockProc(fr->revertInfo, false);
     if (!p) return;
     std::memcpy(p, &b, sizeof(b));
@@ -423,18 +429,77 @@ OSErr FetchRGBA(FormatRecordPtr fr, std::vector<uint8_t>& rgba) {
 }
 
 // ---------------------------------------------------------------------------
-// Layers -> animation frames.
+// Alpha source (Auto / transparency / none / a named alpha channel).
 
-// Layers that become frames: visible pixel layers (adjustment layers, groups
-// and anything without colour channels are skipped). Document order, which is
-// bottom to top.
-std::vector<ReadLayerDesc*> FrameLayers(FormatRecordPtr fr) {
-    std::vector<ReadLayerDesc*> out;
-    if (!fr->documentInfo || fr->documentInfo->layerCount <= 0) return out;
-    for (ReadLayerDesc* l = fr->documentInfo->layersDescriptor; l; l = l->next)
-        if (l->isVisible && !l->isAdjustor && l->compositeChannelsList) out.push_back(l);
+std::vector<ReadChannelDesc*> AlphaChannels(FormatRecordPtr fr) {
+    std::vector<ReadChannelDesc*> out;
+    if (fr->documentInfo)
+        for (ReadChannelDesc* c = fr->documentInfo->alphaChannels; c; c = c->next) out.push_back(c);
     return out;
 }
+
+std::wstring ChannelName(const ReadChannelDesc* c, size_t index) {
+    if (c->maxVersion >= 3 && c->unicodeName && c->unicodeName[0])
+        return std::wstring(reinterpret_cast<const wchar_t*>(c->unicodeName));
+    if (c->name && c->name[0]) {
+        const int n = MultiByteToWideChar(CP_ACP, 0, c->name, -1, nullptr, 0);
+        std::wstring w(size_t(n > 0 ? n : 1), L'\0');
+        if (n > 0) MultiByteToWideChar(CP_ACP, 0, c->name, -1, &w[0], n);
+        w.resize(wcslen(w.c_str()));
+        if (!w.empty()) return w;
+    }
+    return L"Alpha " + std::to_wstring(index + 1);
+}
+
+// The document's transparency channel: merged (several layers) or the single layer's.
+ReadChannelDesc* DocumentTransparency(FormatRecordPtr fr) {
+    ReadImageDocumentDesc* doc = fr->documentInfo;
+    if (!doc) return nullptr;
+    if (doc->mergedTransparency) return doc->mergedTransparency;
+    if (doc->layerCount == 1 && doc->layersDescriptor) return doc->layersDescriptor->transparency;
+    return nullptr;
+}
+
+AlphaInfo GetAlphaInfo(FormatRecordPtr fr) {
+    AlphaInfo a;
+    const auto chans = AlphaChannels(fr);
+    for (size_t i = 0; i < chans.size(); ++i) a.channels.push_back(ChannelName(chans[i], i));
+    a.autoSource = !chans.empty()             ? vtf::ALPHA_SOURCE_CHANNEL_FIRST
+                   : DocumentTransparency(fr) ? vtf::ALPHA_SOURCE_TRANSPARENCY
+                                              : vtf::ALPHA_SOURCE_NONE;
+    return a;
+}
+
+// Replaces the alpha of `frames` according to opt.alphaSource. For animation
+// frames (layers) "Auto" and "Transparency" keep each layer's own transparency.
+bool ApplyAlphaSource(FormatRecordPtr fr, int source, bool layerFrames, int32 w, int32 h,
+                      std::vector<std::vector<uint8_t>>& frames) {
+    const auto chans = AlphaChannels(fr);
+    if (source >= vtf::ALPHA_SOURCE_CHANNEL_FIRST && size_t(source - vtf::ALPHA_SOURCE_CHANNEL_FIRST) >= chans.size())
+        source = vtf::ALPHA_SOURCE_AUTO;  // channel no longer exists
+    const size_t n = size_t(w) * h;
+    std::vector<uint8_t> a;
+    if (source == vtf::ALPHA_SOURCE_NONE) {
+        a.assign(n, 255);
+    } else if (source >= vtf::ALPHA_SOURCE_CHANNEL_FIRST ||
+               (source == vtf::ALPHA_SOURCE_AUTO && !layerFrames && !chans.empty())) {
+        ReadChannelDesc* c = chans[source >= vtf::ALPHA_SOURCE_CHANNEL_FIRST ? source - vtf::ALPHA_SOURCE_CHANNEL_FIRST : 0];
+        a.assign(n, 255);
+        if (!ReadChannel(fr, c, w, h, false, a)) return false;
+    } else if (source == vtf::ALPHA_SOURCE_TRANSPARENCY && !layerFrames) {
+        a.assign(n, 255);
+        ReadChannelDesc* t = DocumentTransparency(fr);
+        if (t && !ReadChannel(fr, t, w, h, false, a)) return false;
+    } else {
+        return true;  // keep what was read
+    }
+    for (auto& f : frames)
+        for (size_t i = 0; i < n; ++i) f[i * 4 + 3] = a[i];
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Layers -> animation frames.
 
 std::wstring LayerName(const ReadLayerDesc* l) {
     if (l->unicodeName && l->unicodeName[0]) {
@@ -445,8 +510,60 @@ std::wstring LayerName(const ReadLayerDesc* l) {
     return l->name ? Widen(l->name) : std::wstring(L"?");
 }
 
-// One layer as RGBA8: colour channels, alpha = transparency x mask x opacity.
-bool ReadLayerFrame(FormatRecordPtr fr, ReadLayerDesc* l, int32 w, int32 h, std::vector<uint8_t>& rgba) {
+// "Frame 3 Alpha" / "Кадр 3 Альфа" -> base "Frame 3" / "Кадр 3".
+bool SplitAlphaLayerName(std::wstring name, std::wstring& base) {
+    while (!name.empty() && iswspace(name.back())) name.pop_back();
+    const size_t sp = name.find_last_of(L" \t");
+    if (sp == std::wstring::npos || sp == 0) return false;
+    std::wstring suffix = name.substr(sp + 1);
+    CharLowerBuffW(&suffix[0], DWORD(suffix.size()));
+    if (suffix != L"alpha" && suffix != L"\x0430\x043b\x044c\x0444\x0430") return false;  // "альфа"
+    base = name.substr(0, sp);
+    while (!base.empty() && iswspace(base.back())) base.pop_back();
+    return !base.empty();
+}
+
+// A frame: a visible pixel layer, plus its alpha layer if the document has one
+// named "<frame layer name> Alpha" (visible or not).
+struct FrameLayer {
+    ReadLayerDesc* color = nullptr;
+    ReadLayerDesc* alpha = nullptr;
+};
+
+// Layers that become frames: visible pixel layers (adjustment layers, groups
+// and anything without colour channels are skipped), except alpha layers.
+// Document order, which is bottom to top.
+std::vector<FrameLayer> FrameLayers(FormatRecordPtr fr) {
+    std::vector<FrameLayer> out;
+    if (!fr->documentInfo || fr->documentInfo->layerCount <= 0) return out;
+    std::vector<ReadLayerDesc*> pix;
+    std::vector<std::wstring> names;
+    for (ReadLayerDesc* l = fr->documentInfo->layersDescriptor; l; l = l->next)
+        if (!l->isAdjustor && l->compositeChannelsList) { pix.push_back(l); names.push_back(LayerName(l)); }
+    std::vector<std::wstring> base(pix.size());
+    std::vector<bool> isAlpha(pix.size(), false), used(pix.size(), false);
+    for (size_t i = 0; i < pix.size(); ++i) {
+        if (!SplitAlphaLayerName(names[i], base[i])) continue;
+        for (size_t j = 0; j < pix.size() && !isAlpha[i]; ++j)
+            if (j != i && names[j] == base[i]) isAlpha[i] = true;
+    }
+    for (size_t i = 0; i < pix.size(); ++i) {
+        if (isAlpha[i] || !pix[i]->isVisible) continue;
+        FrameLayer f;
+        f.color = pix[i];
+        // Prefer the alpha layer right above, then any unused one with the name.
+        for (int pass = 0; pass < 2 && !f.alpha; ++pass)
+            for (size_t k = pass == 0 ? i + 1 : 0; k < pix.size() && !f.alpha; ++k)
+                if (isAlpha[k] && !used[k] && base[k] == names[i]) { f.alpha = pix[k]; used[k] = true; }
+        out.push_back(f);
+    }
+    return out;
+}
+
+// One frame as RGBA8: colour channels, alpha = transparency x mask x opacity
+// (x the grey of its alpha layer, if any).
+bool ReadLayerFrame(FormatRecordPtr fr, const FrameLayer& frame, int32 w, int32 h, std::vector<uint8_t>& rgba) {
+    ReadLayerDesc* l = frame.color;
     rgba.assign(size_t(w) * h * 4, 0);
     if (!ReadColorChannels(fr, l->compositeChannelsList, w, h, rgba)) return false;
 
@@ -461,6 +578,18 @@ bool ReadLayerFrame(FormatRecordPtr fr, ReadLayerDesc* l, int32 w, int32 h, std:
     const uint32_t opacity = uint32_t(l->opacity) * uint32_t(l->fillOpacity);  // 0 .. 255*255
     for (size_t i = 0; i < n; ++i)
         rgba[i * 4 + 3] = uint8_t((alpha[i] * opacity + 32512) / 65025);
+    if (frame.alpha) {
+        // Alpha layer: its grey (transparent parts count as black).
+        std::vector<uint8_t> a(n * 4, 0);
+        if (!ReadColorChannels(fr, frame.alpha->compositeChannelsList, w, h, a)) return false;
+        std::vector<uint8_t> t(n, 255);
+        if (frame.alpha->transparency && !ReadChannel(fr, frame.alpha->transparency, w, h, false, t)) return false;
+        for (size_t i = 0; i < n; ++i) {
+            const uint32_t grey = (a[i * 4] * 299u + a[i * 4 + 1] * 587u + a[i * 4 + 2] * 114u + 500u) / 1000u;
+            const uint32_t v = (grey * t[i] + 127) / 255;
+            rgba[i * 4 + 3] = uint8_t((rgba[i * 4 + 3] * v + 127) / 255);
+        }
+    }
     return true;
 }
 
@@ -525,12 +654,37 @@ void DoReadStart(FormatRecordPtr fr, int16* result) {
     if (g_read.layered) {
         // One layer per frame; alpha becomes the layers' transparency. Layers
         // are created bottom to top, so the first one is the bottom layer.
+        // With "alpha as separate layers" every frame becomes an opaque colour layer
+        // plus a hidden grey layer with its alpha just above it ("Frame n Alpha").
         const uint32_t n = uint32_t(g_read.frames.size());
-        for (uint32_t i = 0; i < n; ++i)
-            g_read.layerFrames.push_back(saved.frameOrder == vtf::FRAME_ORDER_TOP_DOWN ? n - 1 - i : i);
-        g_read.planes = 4;
-        fr->layerData = n;
-        fr->transparencyPlane = 3;
+        bool anyAlpha = false;
+        for (const auto& f : g_read.frames) {
+            for (size_t i = 3; i < f.size() && !anyAlpha; i += 4) anyAlpha = f[i] != 255;
+            if (anyAlpha) break;
+        }
+        bool alphaLayers = false;
+        if (anyAlpha) {
+            int mode = LoadOptions().animAlpha;
+            if (mode == 2) mode = AskAnimAlpha(parent);
+            if (mode < 0) {
+                g_read = PendingRead();
+                *result = userCanceledErr;
+                return;
+            }
+            alphaLayers = mode == 0;
+        }
+        for (uint32_t i = 0; i < n; ++i) {
+            const uint32_t frame = saved.frameOrder == vtf::FRAME_ORDER_TOP_DOWN ? n - 1 - i : i;
+            g_read.layerFrames.push_back(frame);
+            g_read.layerIsAlpha.push_back(false);
+            if (alphaLayers) {
+                g_read.layerFrames.push_back(frame);
+                g_read.layerIsAlpha.push_back(true);
+            }
+        }
+        g_read.planes = alphaLayers ? 3 : 4;
+        fr->layerData = uint32_t(g_read.layerFrames.size());
+        fr->transparencyPlane = alphaLayers ? 0 : 3;
         fr->transparencyMatting = 0;
     } else {
         g_read.planes = info.hasAlpha ? 4 : 3;  // alpha goes to an alpha channel ("Alpha 1")
@@ -594,21 +748,45 @@ void DoReadContinue(FormatRecordPtr fr, int16* result) {
     if (err != noErr) *result = err;
 }
 
-void DoReadLayerStart(FormatRecordPtr fr) {
-    if (!g_read.layered || g_read.nextLayer >= g_read.layerFrames.size()) return;
-    const uint32_t frame = g_read.layerFrames[g_read.nextLayer];
-    const std::wstring name = lang::Tf("layer.frame", {{"n", std::to_wstring(frame + 1)}});
+// Name and visibility of the layer being read (Start and again in Finish: the SDK
+// asks for the name "before leaving ReadLayerFinish").
+void SetLayerInfo(FormatRecordPtr fr, size_t layer) {
+    const uint32_t frame = g_read.layerFrames[layer];
+    const bool alpha = g_read.layerIsAlpha[layer];
+    const std::wstring name = lang::Tf(alpha ? "layer.frame_alpha" : "layer.frame", {{"n", std::to_wstring(frame + 1)}});
     g_layerName.assign(name.begin(), name.end());
     g_layerName.push_back(0);
     fr->layerName = g_layerName.data();
+    fr->isVisible = !alpha;
+}
+
+void DoReadLayerStart(FormatRecordPtr fr) {
+    if (!g_read.layered || g_read.nextLayer >= g_read.layerFrames.size()) return;
+    SetLayerInfo(fr, g_read.nextLayer);
 }
 
 void DoReadLayerContinue(FormatRecordPtr fr, int16* result) {
     if (!g_read.layered || g_read.nextLayer >= g_read.layerFrames.size()) return;
-    const uint32_t frame = g_read.layerFrames[g_read.nextLayer++];
-    const OSErr err = SendImage(fr, g_read.frames[frame]);
-    std::vector<uint8_t>().swap(g_read.frames[frame]);  // free as we go
+    const size_t layer = g_read.nextLayer++;
+    const uint32_t frame = g_read.layerFrames[layer];
+    OSErr err;
+    if (g_read.layerIsAlpha[layer]) {
+        // Grey picture of the alpha (R = G = B = A).
+        std::vector<uint8_t>& px = g_read.frames[frame];
+        for (size_t i = 0; i < px.size(); i += 4) px[i] = px[i + 1] = px[i + 2] = px[i + 3];
+        err = SendImage(fr, px);
+        std::vector<uint8_t>().swap(px);  // the colour layer was sent before
+    } else {
+        err = SendImage(fr, g_read.frames[frame]);
+        const bool alphaNext = layer + 1 < g_read.layerIsAlpha.size() && g_read.layerIsAlpha[layer + 1];
+        if (!alphaNext) std::vector<uint8_t>().swap(g_read.frames[frame]);  // free as we go
+    }
     if (err != noErr) *result = err;
+}
+
+void DoReadLayerFinish(FormatRecordPtr fr) {
+    if (g_read.layered && g_read.nextLayer > 0 && g_read.nextLayer <= g_read.layerFrames.size())
+        SetLayerInfo(fr, g_read.nextLayer - 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -639,8 +817,32 @@ void DoOptionsStart(FormatRecordPtr fr, int16* result) {
     }
     const int visibleLayers = int(FrameLayers(fr).size());
     if (visibleLayers < 2) opt.animate = false;
+    const AlphaInfo alpha = GetAlphaInfo(fr);
+    // Preview: exactly what the save would write - the animation frames (alpha layers,
+    // masks...) with "layers -> animation", otherwise the merged document.
+    const FetchPixelsFn fetch = [fr, w, h](int alphaSource, bool animate, int frameOrder, std::vector<std::vector<uint8_t>>& frames) {
+        std::vector<FrameLayer> layers = animate ? FrameLayers(fr) : std::vector<FrameLayer>();
+        if (layers.size() >= 2) {
+            if (frameOrder == vtf::FRAME_ORDER_TOP_DOWN) std::reverse(layers.begin(), layers.end());
+            frames.assign(layers.size(), {});
+            for (size_t i = 0; i < layers.size(); ++i)
+                if (!ReadLayerFrame(fr, layers[i], w, h, frames[i])) return false;
+            return ApplyAlphaSource(fr, alphaSource, true, w, h, frames);
+        }
+        ReadImageDocumentDesc* doc = fr->documentInfo;
+        if (!doc || !doc->mergedCompositeChannels) return false;
+        frames.assign(1, std::vector<uint8_t>(size_t(w) * h * 4, 255));
+        if (!ReadColorChannels(fr, doc->mergedCompositeChannels, w, h, frames[0])) return false;
+        // Transparency first (Auto falls back to it), then the chosen source on top.
+        if (ReadChannelDesc* t = DocumentTransparency(fr)) {
+            std::vector<uint8_t> a(size_t(w) * h, 255);
+            if (ReadChannel(fr, t, w, h, false, a))
+                for (size_t i = 0; i < a.size(); ++i) frames[0][i * 4 + 3] = a[i];
+        }
+        return ApplyAlphaSource(fr, alphaSource, false, w, h, frames);
+    };
     for (;;) {
-        if (!ShowOptionsDialog(parent, opt, w, h, visibleLayers)) {
+        if (!ShowOptionsDialog(parent, opt, w, h, visibleLayers, alpha, fetch)) {
             *result = userCanceledErr;
             return;
         }
@@ -740,13 +942,13 @@ void DoWriteStart(FormatRecordPtr fr, int16* result) {
 
     const int32 w = ImageWidth(fr), h = ImageHeight(fr);
     std::vector<std::vector<uint8_t>> frames;
-    std::vector<ReadLayerDesc*> layers = opt.animate ? FrameLayers(fr) : std::vector<ReadLayerDesc*>();
+    std::vector<FrameLayer> layers = opt.animate ? FrameLayers(fr) : std::vector<FrameLayer>();
     if (layers.size() >= 2) {
         if (opt.frameOrder == vtf::FRAME_ORDER_TOP_DOWN) std::reverse(layers.begin(), layers.end());
         frames.resize(layers.size());
         for (size_t i = 0; i < layers.size(); ++i) {
             if (!ReadLayerFrame(fr, layers[i], w, h, frames[i])) {
-                ShowError(parent, lang::Tf("msg.layer_error", {{"name", LayerName(layers[i])}}));
+                ShowError(parent, lang::Tf("msg.layer_error", {{"name", LayerName(layers[i].color)}}));
                 *result = userCanceledErr;
                 return;
             }
@@ -758,6 +960,12 @@ void DoWriteStart(FormatRecordPtr fr, int16* result) {
             *result = err;
             return;
         }
+    }
+
+    if (!ApplyAlphaSource(fr, opt.alphaSource, layers.size() >= 2, w, h, frames)) {
+        ShowError(parent, lang::T("msg.alpha_error"));
+        *result = userCanceledErr;
+        return;
     }
 
     std::vector<const uint8_t*> ptrs;
@@ -832,6 +1040,7 @@ extern "C" __declspec(dllexport) void PluginMain(const int16 selector, FormatRec
             break;
 
         case formatSelectorReadLayerFinish:
+            DoReadLayerFinish(fr);
             break;
 
         case formatSelectorOptionsStart:

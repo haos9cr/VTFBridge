@@ -11,7 +11,7 @@ No external DLLs: VTFLib is not needed, DXT compression is built in.
 
 Formerly named **VTF Export** (1.0).
 
-![Save dialog](docs/screenshot.png)
+![Save dialog](docs/save_en.png)
 
 ## Features
 
@@ -27,8 +27,11 @@ Formerly named **VTF Export** (1.0).
 **Saving**
 - Formats: **Auto DXT1 / DXT5** (default — DXT5 only if the image has alpha), **Auto BGR888 / BGRA8888**,
   or exactly DXT1, DXT3, DXT5, BGR888, BGRA8888, RGB888, RGBA8888, BGR565, BGRA4444, BGRA5551, I8, IA88, A8.
+- **DXT quality:** VTFBridge's own *Accurate* (default) and *Perceptual* modes, plus Fast (stb_dxt) and High / Best (icbc) — see [DXT quality](#dxt-quality).
+- **Alpha source:** layer transparency (like PNG), any alpha channel of the document by name, or none —
+  see [Alpha](#alpha).
 - VTF versions 7.1 – 7.5.
-- Mipmaps with 15 filters (all VTFEdit filters + Lanczos), optional gamma-correct filtering;
+- Mipmaps with 15 filters (all VTFEdit filters + Lanczos), adjustable sharpness, optional gamma-correct filtering;
   16×16 DXT1 thumbnail like Valve's tools.
 - Resize to a power of two (nearest / larger / smaller) with a filter and max width / height;
   the final size is shown in the dialog.
@@ -37,10 +40,12 @@ Formerly named **VTF Export** (1.0).
 - **Normal maps:** with the *Normal Map* flag the mipmaps are renormalized, so the bumps do not
   flatten out in the distance.
 - **Optional `.vmt`** next to the texture (see [Material](#material-vmt)).
-- Estimated file size in the dialog.
+- Estimated file size in the dialog and a **texture preview** window: every mip as saved, comparison with
+  the uncompressed mips or your own image (see [Texture preview](#texture-preview)).
 - **Visible layers → animation frames.**
 - RGB and Grayscale documents, 8/16/32 bits per channel.
-- Remembers the last used settings.
+- Remembers the last used settings; a **Settings** window (*Help → About Plug-ins → Valve Texture Format → Settings…*)
+  sets the language, how animations open and the saving defaults without saving a file first.
 
 **Interface:** English, Русский, Deutsch built in; more languages can be added (see [Translations](#translations)).
 
@@ -69,6 +74,14 @@ and tested with Photoshop 2026 / 27.x).
 The options dialog appears before saving. If the size is not a power of two and resizing is off,
 the plug-in warns you (Source may display such textures incorrectly) but lets you save anyway.
 
+### Settings
+
+*Help → About Plug-ins → Valve Texture Format → Settings…* sets the language, how animated VTF files
+open and the saving defaults — without saving a file first. The save dialog remembers its last
+values too; both edit the same settings.
+
+![Settings](docs/settings_en.png)
+
 ### Which mipmap / resize filter?
 
 | Filter | Look | Use for |
@@ -88,11 +101,66 @@ and the top with the bottom, so the mipmaps stay seamless. *Clamp S* / *Clamp T*
 their direction. The setting is remembered; it is switched off when re-saving a VTF that has both
 *Clamp S* and *Clamp T*.
 
+**Mipmap sharpness** (0–100 %, default 0) sharpens every mip after it is reduced, so small detail
+stays visible at a distance. Try 20–40 % with *Box*; with sharp filters (Kaiser, Lanczos) less is
+needed. By default only the colour is sharpened; tick **Alpha too** to sharpen the alpha
+as well (cut-outs, fences, foliage that should not fade out in the distance). The full-size image is never changed.
+
+### Texture preview
+
+**Preview…** at the bottom of the save dialog shows the texture exactly as it will be saved: every mip
+level is compressed and decoded back. The window can be resized or maximized.
+
+![Preview: split view, reference | result](docs/preview_split_en.png)
+
+- **Frame** (animations, with *Layers → animation frames*) — every frame as it will be saved (alpha
+  layers and masks included); a VTF reference is compared frame by frame.
+- **Level** — mip 0 (full size) down to 1 × 1. **Auto** picks the mip a graphics card would use at the
+  current zoom, like moving away from a wall in the game.
+- **Zoom** — measured against the full-size texture, so switching levels keeps the picture in place
+  (smaller mips just look coarser). The mouse wheel zooms smoothly around the cursor; *Fit*, presets,
+  or type a value. Drag to move.
+- **View** — colour, alpha only, or colour on a checkerboard. **Tile** repeats the texture, to check
+  the seams of tiling textures.
+- **Show** — *Result*; *Reference*; *Split* (drag the line: reference on the left, result on the
+  right); *Difference* (amplified ×8: dark = exact, blue → red → yellow → white = growing error;
+  with the alpha view it compares alpha); *Mip chain* — all levels side by side (hover a mip for its
+  numbers). **Hold Space** to see the reference instead of the result.
+- **Reference** — *Without compression* (the same mips before DXT) or **your own image**: PNG, TGA,
+  JPEG, BMP, TIFF, DDS, WebP or VTF, e.g. the original texture you are recreating or translating. It does not
+  follow the preview's settings: a VTF's own mips are used as stored (when the sizes match — a reference
+  twice as large lines up from its mip 1); for other images, or levels the file does not have, the picture
+  is scaled to the level size (Mitchell for the full size, then plain Box averaging). The list shows which.
+- The line below the image gives the size, the format and the **accuracy** (PSNR in dB against the
+  reference; higher is closer): ≥ 45 excellent, 38–45 good, 32–38 visible loss, below 32 heavy loss.
+  These grades are a rough guide.
+
+| Difference ×8 | Mip chain | Animation frames |
+|---|---|---|
+| ![Difference](docs/preview_diff_en.png) | ![Mip chain](docs/preview_chain_en.png) | ![Frames](docs/preview_anim_en.png) |
+- *Resize filter* (when the image is resized), *Mipmap filter*, *Sharpness* and *Quality* can be
+  changed here; **Apply** copies them to the save dialog.
+
 ### Animation
 
 **Opening:** every frame becomes a layer. To play it in Photoshop: *Window → Timeline* →
 *Create Frame Animation* → panel menu → **Make Frames From Layers**. VTF files have no frame rate;
 it is set in the `.vmt` (`animatedtextureframerate` of the `AnimatedTexture` proxy).
+
+**Frame alpha** (*Help → About Plug-ins → Valve Texture Format → Settings…*: *Hidden layer* — default, *Layer
+transparency*, or *Ask every time* with a *Remember my choice* box). With hidden layers an
+animation with alpha opens as an opaque layer per frame (*Frame 1*) plus a
+hidden grey layer with that frame's alpha right above it (*Frame 1 Alpha*). The colour under
+transparent parts stays fully editable; paint the alpha layer white (opaque) / black (transparent).
+On saving, a layer named *<frame layer> Alpha* (or *Альфа*) becomes the alpha of that frame, hidden
+or not, and is never a frame itself. Hide the alpha layers before *Make Frames From Layers*.
+To see the transparency in Photoshop (e.g. to play the animation), run **File → Automate → VTFBridge:
+Alpha Layers to Masks**: every *Frame N Alpha* layer becomes the layer mask of *Frame N* (one undo
+step). Masks keep the colour under them, and saving reads them directly.
+(Photoshop does not let a format plug-in create layer masks or fill alpha channels when it opens a
+layered file, so separate layers are the way to keep colour and alpha apart.)
+
+![Question when opening an animation with alpha](docs/ask_en.png)
 
 **Saving:** in the *Animation* box of the dialog:
 - **Layers → animation frames** — every visible layer becomes a frame. Off by default; greyed out
@@ -102,12 +170,48 @@ it is set in the `.vmt` (`animatedtextureframerate` of the `AnimatedTexture` pro
   top to bottom. Remembered. A document opened from a VTF is saved back in the order it was opened.
 - Only **visible** layers are used; adjustment layers and groups are skipped — hide a layer to
   leave it out.
-- Frames use the raw layer pixels: transparency × layer mask × opacity × fill.
+- Frames use the raw layer pixels: transparency × layer mask × opacity × fill (× the frame's alpha layer).
   **Layer styles, blend modes and adjustment layers are not applied** — rasterize such layers first.
 - *Auto* formats look at all frames: if any frame has alpha, all frames use DXT5.
 
 Note: Photoshop may not keep the colour of fully transparent layer pixels. If the alpha of an
 animation is a mask (not transparency) and the colour under it matters, check the result.
+
+### DXT quality
+
+DXT stores every 4×4 block as two colours plus two in-between shades; the quality setting decides
+how those colours are chosen.
+
+| Setting | Encoder | Use |
+|---|---|---|
+| **Fast (stb_dxt)** | stb_dxt (as in 1.0 / 1.1) | quick tests |
+| **High (icbc)** | icbc cluster fit (third party) | fast, accurate on detailed textures |
+| **Best (icbc)** | icbc full cluster fit + searched DXT5 alpha (third party) | as High, better DXT5 alpha |
+| **VTFBridge: Accurate** (default) | stb_dxt + VTFBridge's own endpoint refinement + searched DXT5 alpha | everything; the smoothest gradients |
+| **VTFBridge: Perceptual** | Accurate, with errors weighted like the eye (green > red > blue) | colour textures; not for masks or data |
+
+The VTFBridge modes polish the two colours of every block with a local search against the exact
+palette, so the result does not depend on one GPU's rounding (measured with the D3D10, NVIDIA and AMD
+decoders). On smooth gradients — skies, walls, soft shading — icbc tends to merge nearly equal colours
+and leaves flat 4×4 steps; *Accurate* keeps such gradients smooth (in our gradient test the banding is
+about half as strong as with *Fast* or *High*). On detailed textures all modes are close. *Perceptual* lowers
+the eye-weighted error at the cost of a little plain error; normal maps always use *Accurate*.
+
+Large images are compressed on all CPU cores. Use the [preview](#texture-preview) to compare the modes.
+
+### Alpha
+
+The *Alpha* list in the *Format* box chooses where the alpha comes from:
+
+- **Layer transparency** — the checkerboard areas, like in a PNG.
+- **Channel "…"** — an alpha channel from the *Channels* panel, listed by name. Use it for masks
+  such as `$basealphaenvmapmask`, `$selfillum` or a phong mask, while the image itself stays opaque.
+- **None** — saved without alpha (the *Auto* formats then pick DXT1 / BGR888).
+- **Auto** (default) — the first alpha channel if there is one, otherwise the transparency. The list
+  shows what *Auto* uses for the current document.
+
+For animation frames, *Auto* and *Layer transparency* use each layer's own transparency; a chosen
+channel is applied to every frame.
 
 ### Material (.vmt)
 
@@ -142,7 +246,7 @@ replaces the strings it contains — handy for fixing a few strings.
 
 **Without rebuilding:** put the file into `VTFBridge_lang` next to the plug-in. Languages are
 re-read every time the dialog opens. The folder path is shown in
-*Help → About Plug-In → VTFBridge*.
+*Help → About Plug-ins → Valve Texture Format*.
 
 ## Building from source
 
@@ -188,7 +292,7 @@ src/            plug-in source (VtfWriter/VtfReader/Resample/Vmt are platform-in
 lang/           translations embedded at build time (+ template.lang.txt)
 tools/          embed_lang (build), check_lang (translation checker), make_release
 tests/          test suite, sdk_stub for the fake hosts
-third_party/    stb_dxt.h (DXT compressor, public domain)
+third_party/    stb_dxt.h (fast DXT compressor, public domain), icbc.h (high-quality DXT1 colour encoder, MIT)
 photoshop_sdk/  put the Photoshop SDK here (not in the repository)
 docs/           screenshots
 ```

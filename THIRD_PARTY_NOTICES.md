@@ -6,6 +6,12 @@ DXT1/DXT5 block compressor by Sean Barrett and Fabian "ryg" Giesen, v1.12,
 <https://github.com/nothings/stb>. Dual-licensed: public domain (Unlicense) or MIT —
 see the end of the file. Used unmodified.
 
+## icbc.h (`third_party/icbc.h`)
+
+High-quality BC1 (DXT1 colour) encoder by Ignacio Castaño, v1.05,
+<https://github.com/castano/icbc>. MIT license — see the end of the file. Used unmodified
+(compiled with SSE2 only) for the *High* and *Best* DXT quality settings.
+
 ## Photoshop SDK (not included)
 
 The plug-in is built against the Adobe Photoshop Plug-In and Connection SDK, which is

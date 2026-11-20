@@ -94,10 +94,36 @@ struct Options {
     // Plug-in level (not used by the encoder itself).
     bool     animate        = false;      // save visible layers as animation frames
     int      frameOrder     = 0;          // FRAME_ORDER_*
+    int      animAlpha      = 0;          // opening an animation with alpha: 0 hidden alpha layers, 1 layer transparency, 2 ask
+    int      dxtQuality     = 3;          // DXT_QUALITY_*
+    int      mipSharpen     = 0;          // 0..100: unsharp mask on every mipmap below the top level
+    bool     sharpenAlpha   = false;      // ...on the alpha channel too
+    int      alphaSource    = 0;          // ALPHA_SOURCE_* (used by the plug-in when reading the document)
     bool     tiling         = false;      // wrap across opposite edges when filtering (resize, mipmaps);
                                           // Clamp S / Clamp T still force clamping on their axis
     bool     vmt            = false;      // also write a .vmt next to the .vtf (if none exists)
     int      vmtShader      = 0;          // vmt::Shader
+};
+
+// DXT compression quality (stored in settings; do not reorder).
+enum DxtQuality : int {
+    DXT_QUALITY_FAST = 0,  // stb_dxt (1.0 / 1.1 behaviour)
+    DXT_QUALITY_HIGH,      // icbc level 5 (third party)
+    DXT_QUALITY_BEST,      // icbc level 8 + searched DXT5 alpha (third party)
+    // VTFBridge's own modes: stb_dxt endpoints refined against the exact palette
+    // (GPU-neutral) + searched DXT5 alpha.
+    DXT_QUALITY_MAX,         // "Accurate" (default)
+    DXT_QUALITY_PERCEPTUAL,  // as MAX, error weighted like the eye (green > red > blue);
+                             // normal maps / SSBump fall back to MAX
+    DXT_QUALITY_COUNT
+};
+
+// Where the alpha comes from (plug-in setting; the writer only sees RGBA).
+enum AlphaSource : int {
+    ALPHA_SOURCE_AUTO = 0,            // first alpha channel, else transparency
+    ALPHA_SOURCE_TRANSPARENCY = 1,    // layer transparency (like PNG)
+    ALPHA_SOURCE_NONE = 2,            // opaque
+    ALPHA_SOURCE_CHANNEL_FIRST = 100  // 100 + n = n-th alpha channel of the document
 };
 
 enum FrameOrder : int {
@@ -116,6 +142,18 @@ void TargetSize(uint32_t w, uint32_t h, const Options& opt, uint32_t& tw, uint32
 
 // Size in bytes of one image of the given format.
 uint32_t ImageSize(int32_t format, uint32_t width, uint32_t height);
+
+// Mip levels as they will look in the file, for the preview: `original` is the
+// level before conversion, `decoded` after encoding to the chosen format and
+// decoding again (DXT artefacts included). `level` >= 0 encodes only that level
+// (the others keep an empty `decoded`). psnr: colour PSNR of decoded vs original.
+struct PreviewLevel {
+    uint32_t w = 0, h = 0;
+    std::vector<uint8_t> original, decoded;
+    double psnr = 0;
+};
+bool BuildPreview(const uint8_t* rgba, uint32_t width, uint32_t height, const Options& opt,
+                  std::vector<PreviewLevel>& levels, int32_t& format, int level = -1);
 
 // Exact size of the .vtf file Write() produces for a texture of texW x texH
 // (the size after resizing, see TargetSize) in format `fmt` with `frames` frames.
